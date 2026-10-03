@@ -1,0 +1,102 @@
+name: Deploy Frontend → Azure Web Apps
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'app.py'
+      - 'requirements.txt'
+      - 'Dockerfile.frontend'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:
+
+env:
+  # ── Update these to match your Azure resources ─────────────────────────────
+  AZURE_WEBAPP_NAME: careeros-frontend
+  IMAGE_NAME: careeros-frontend
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Azure Login ────────────────────────────────────────────────────
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # ── 3. Login to Azure Container Registry ─────────────────────────────
+      - name: Login to ACR
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # ── 4. Build & Push Docker Image ──────────────────────────────────────
+      - name: Build and push frontend image
+        run: |
+          IMAGE_TAG=${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          IMAGE_LATEST=${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+
+          docker build \
+            --file Dockerfile.frontend \
+            --tag $IMAGE_TAG \
+            --tag $IMAGE_LATEST \
+            --cache-from $IMAGE_LATEST \
+            .
+
+          docker push $IMAGE_TAG
+          docker push $IMAGE_LATEST
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+      # ── 5. Configure App Settings ─────────────────────────────────────────
+      # Tell the Streamlit app where the backend is running
+      - name: Set App Settings
+        uses: azure/appservice-settings@v1
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          app-settings-json: |
+            [
+              {
+                "name": "BACKEND_URL",
+                "value": "https://careeros-backend.<your-aca-domain>.azurecontainerapps.io",
+                "slotSetting": false
+              },
+              {
+                "name": "WEBSITES_PORT",
+                "value": "8501",
+                "slotSetting": false
+              }
+            ]
+
+      # ── 6. Deploy Container to Azure Web App ─────────────────────────────
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          images: ${{ env.IMAGE_TAG }}
+
+      # ── 7. Smoke Test ─────────────────────────────────────────────────────
+      - name: Smoke test — ping frontend
+        run: |
+          sleep 30
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" \
+            "https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/_stcore/health")
+          echo "Frontend health status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "⚠️ Health check returned $STATUS — review Azure portal"
+          fi
+
+      # ── 8. Logout ─────────────────────────────────────────────────────────
+      - name: Azure Logout
+        run: az logout
+        if: always()

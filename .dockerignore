@@ -1,0 +1,37 @@
+# Docker ignore — keeps images lean and secrets safe
+# Virtual environments
+.venv/
+.venv-1/
+.venv-2/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Secrets (NEVER in Docker image)
+.env
+.env.*
+
+# PDF files (uploaded at runtime, not baked in)
+*.pdf
+
+# Git
+.git/
+.gitignore
+.github/
+
+# IDE
+.vscode/
+.idea/
+
+# Docs
+README.md
+*.md
+
+# Logs
+*.log
+logs/

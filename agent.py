@@ -1,81 +1,102 @@
-import os
-from click import prompt
 import pdfplumber
+import time
+from langchain_ollama import ChatOllama
 from typing import TypedDict
-from langgraph.graph import StateGraph, END
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_groq import ChatGroq
-from dotenv import load_dotenv
 
-load_dotenv()
+# --- Configuration ---
+HACKATHON_DEMO_MODE = True  # Set to False to use live local Llama 3
 
+# Define the unified graph state
 class CareerOSState(TypedDict):
     pdf_path: str
-    extracted_facts: dict       
+    extracted_facts: dict
     target_role: str
     job_matches: list
-    tailored_cv: str            
+    tailored_cv: str
     outreach_draft: str
-    z_axis_approved: bool       
-# LLMs are now armed
+    z_axis_approved: bool
 
-from langchain_ollama import ChatOllama
-# Remove: from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_groq import ChatGroq
-
-# Remove the ChatGoogleGenerativeAI line and replace with:
-gemini_llm = ChatGroq(model="gemma2-9b-it")
-def profile_analyzer(state: CareerOSState):
-    print("--> [Agent: Profile Analyzer] Reading PDF and extracting X-Axis facts...")
-    
-    cv_text = ""
+# Initialize local Llama 3 (No API keys needed)
+local_llm = None
+if not HACKATHON_DEMO_MODE:
     try:
-        with pdfplumber.open(state["pdf_path"]) as pdf:
-            for page in pdf.pages:
-                cv_text += page.extract_text() + "\n"
-    except FileNotFoundError:
-        print("    [!] ERROR: resume.pdf not found in folder!")
-        return {"extracted_facts": {"error": "File not found"}}
+        local_llm = ChatOllama(model="llama3")
+    except Exception as e:
+        print(f"--> [Warning] Could not initialize Llama 3: {e}")
 
-    # Force Gemini to return clean data
-    prompt = f"""
-    You are an AI data extractor. Extract the candidate's top 5 technical skills and their total years of experience from this text.
-    Format your response as a simple list.
-    
-    RESUME TEXT:
-    {cv_text}
+
+def profile_analyzer(state: dict) -> dict:
     """
-    
-      # response = gemini_llm.invoke(prompt)
-    local_llm = ChatOllama(model="llama3") 
-    response = local_llm.invoke(prompt)
-    print(f"    [Success] Gemini extracted: {response.content[:100]}...") # Print a preview
-        
-    return {"extracted_facts": {"extracted_data": response.content}}
+    X-Axis Agent: Extracts structured facts from a candidate's PDF resume
+    using pdfplumber + local Llama 3 (or a demo stub in HACKATHON_DEMO_MODE).
+    """
+    print("--> [Agent: Profile Analyzer] Reading PDF and extracting X-Axis facts...")
 
-def job_scout(state: CareerOSState):
-    print("--> [Agent: Job Scout] Sourcing live market data...")
-    return {"job_matches": [{"title": state.get("target_role", "AI Engineer"), "company": "Tech Corp"}]}
+    if HACKATHON_DEMO_MODE:
+        time.sleep(1.5)  # Simulate processing time for live demo
+        demo_facts = (
+            "Top Skills: Python, LangGraph, FastAPI, Playwright, Streamlit\n"
+            "Experience: 3+ years building agentic AI systems and RPA pipelines."
+        )
+        print("--> [Agent: Profile Analyzer] Demo extraction successful.")
+        return {"extracted_facts": {"extracted_data": demo_facts}}
 
-def tailor(state: CareerOSState):
-    print("--> [Agent: Tailor] Aligning CV (Enforcing Y-Axis Guardrails)...")
-    return {"tailored_cv": "Tailored_Resume_v1.pdf"}
+    # Live pdfplumber + Llama 3 logic
+    cv_text = ""
+    pdf_path = state.get("pdf_path", "resume.pdf")
 
-def hitl_governance(state: CareerOSState):
-    print("--> [Governance] Staging execution for Z-Axis Human Approval...")
-    return {"z_axis_approved": False} 
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    cv_text += extracted + "\n"
 
-workflow = StateGraph(CareerOSState)
+        prompt = (
+            f"Extract the top 5 technical skills and total years of experience "
+            f"from this candidate's resume:\n\n{cv_text}"
+        )
+        response = local_llm.invoke(prompt)
+        print("--> [Agent: Profile Analyzer] Extraction successful.")
+        return {"extracted_facts": {"extracted_data": response.content}}
 
-workflow.add_node("profile_analyzer", profile_analyzer)
-workflow.add_node("job_scout", job_scout)
-workflow.add_node("tailor", tailor)
-workflow.add_node("hitl_governance", hitl_governance)
+    except Exception as e:
+        print(f"--> [Error] Profile Analyzer failed: {e}")
+        return {"extracted_facts": {"extracted_data": f"Failed to parse PDF or connect to Llama 3: {e}"}}
 
-workflow.set_entry_point("profile_analyzer")
-workflow.add_edge("profile_analyzer", "job_scout")
-workflow.add_edge("job_scout", "tailor")
-workflow.add_edge("tailor", "hitl_governance")
-workflow.add_edge("hitl_governance", END)
 
-careeros_graph = workflow.compile()
+def outreach_agent(state: dict) -> dict:
+    """
+    Y-Axis Agent: Drafts a personalized, role-specific outreach email using
+    local Llama 3 (or a demo stub in HACKATHON_DEMO_MODE).
+    """
+    print("--> [Agent: Outreach] Drafting personalized outreach...")
+
+    target_role = state.get("target_role", "AI Engineer")
+    top_job = state.get("job_matches", [{}])[0].get("company", "Tech Corp")
+
+    if HACKATHON_DEMO_MODE:
+        time.sleep(1.0)
+        draft = (
+            f"Subject: Application for {target_role} at {top_job}\n\n"
+            f"Hi Hiring Team,\n\n"
+            f"I am writing to express my interest in the {target_role} position. "
+            f"With a strong foundation in building autonomous digital FTEs, Python, and LangGraph orchestration, "
+            f"I am well-equipped to drive immediate impact at {top_job}.\n\n"
+            f"My complete application is attached. I look forward to discussing how "
+            f"my background aligns with your goals.\n\n"
+            f"Best regards,\nTalha Lodhi"
+        )
+        print("--> [Agent: Outreach] Demo draft successful.")
+        return {"outreach_draft": draft}
+
+    # Live Llama 3 logic
+    if local_llm:
+        prompt = f"Draft a concise, professional cold email for a {target_role} position at {top_job}."
+        try:
+            response = local_llm.invoke(prompt)
+            return {"outreach_draft": response.content}
+        except Exception as e:
+            return {"outreach_draft": f"Failed to generate draft: {e}"}
+
+    return {"outreach_draft": "LLM not initialized."}
