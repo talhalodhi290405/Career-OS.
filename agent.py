@@ -59,14 +59,14 @@ class AgentState(TypedDict):
 
 class CandidateFacts(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: str
+    name: str = ""
     email: str | None = None
     phone: str | None = None
     headline: str = ""
-    skills: list[str]
+    skills: list[str] = Field(default_factory=list)
     experience_years: int | None = None
-    summary: str
-    evidence: list[str] = Field(min_length=1)
+    summary: str = ""
+    evidence: list[str] = Field(default_factory=list)
 
 class InterviewQuestions(BaseModel):
     model_config = ConfigDict(extra="forbid")
