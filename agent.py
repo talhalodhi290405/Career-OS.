@@ -307,8 +307,12 @@ def profile_analyzer(
     )
 
     if not response_text:
-        raise RuntimeError("Groq returned no profile extraction output")
-    facts = _parse_json(response_text, CandidateFacts)
+        facts = CandidateFacts(evidence=[resume_text[:500]], summary=resume_text[:1200])
+    else:
+        try:
+            facts = _parse_json(response_text, CandidateFacts)
+        except Exception:
+            facts = CandidateFacts(evidence=[resume_text[:500]], summary=resume_text[:1200])
     profile = _verified_profile(facts, resume_text)
 
     namespace = f"careeros-{state['run_id']}"
