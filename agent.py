@@ -272,7 +272,7 @@ def profile_analyzer(
     ]
 
     model = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         api_key=groq_key,
         temperature=0,
     )
@@ -618,7 +618,7 @@ def _groq_model(config: RunnableConfig) -> ChatGroq:
     if not api_key:
         raise RuntimeError("Configure GROQ_API_KEY in the sidebar or backend environment")
     return ChatGroq(
-        model=os.getenv("CAREEROS_GROQ_MODEL", "llama-3.3-70b-versatile"),
+        model=os.getenv("CAREEROS_GROQ_MODEL", "openai/gpt-oss-120b"),
         api_key=api_key,
         temperature=0.2,
     )
