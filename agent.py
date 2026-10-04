@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_groq import ChatGroq
 from langchain_pinecone import PineconeVectorStore
 from langgraph.checkpoint.memory import InMemorySaver
@@ -23,7 +23,6 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field
-
 
 load_dotenv()
 logger = logging.getLogger("careeros.agents")
@@ -34,7 +33,6 @@ os.environ["LANGCHAIN_TRACING_V2"] = "true" if _langsmith_key else "false"
 os.environ["LANGSMITH_TRACING"] = "true" if _langsmith_key else "false"
 os.environ.setdefault("LANGSMITH_HIDE_INPUTS", "true")
 os.environ.setdefault("LANGSMITH_HIDE_OUTPUTS", "true")
-
 
 class AgentState(TypedDict):
     profile_data: dict[str, Any]
@@ -70,12 +68,10 @@ class CandidateFacts(BaseModel):
     summary: str
     evidence: list[str] = Field(min_length=1)
 
-
 class InterviewQuestions(BaseModel):
     model_config = ConfigDict(extra="forbid")
     questions: list[str] = Field(min_length=4, max_length=8)
     technical_challenges: list[str] = Field(min_length=1, max_length=5)
-
 
 def create_initial_state() -> AgentState:
     return {
@@ -102,10 +98,8 @@ def create_initial_state() -> AgentState:
         "ats_score": 0,
     }
 
-
 def _config_values(config: RunnableConfig) -> dict[str, Any]:
     return config.get("configurable", {})
-
 
 def _credential(config: RunnableConfig, name: str) -> str:
     value = _config_values(config).get("credentials", {}).get(name)
@@ -115,17 +109,14 @@ def _credential(config: RunnableConfig, name: str) -> str:
         value = os.getenv("GEMINI_API_KEY")
     return str(value).strip() if value else ""
 
-
 def _writer() -> Any:
     try:
         return get_stream_writer()
     except RuntimeError:
         return lambda _event: None
 
-
 def _emit(kind: str, **payload: Any) -> None:
     _writer()({"type": kind, **payload})
-
 
 def _token_text(message: Any) -> str:
     content = getattr(message, "content", "")
@@ -138,7 +129,6 @@ def _token_text(message: Any) -> str:
         )
     return str(content or "")
 
-
 def _usage_from_chunk(message: Any) -> dict[str, int]:
     usage = getattr(message, "usage_metadata", None) or {}
     response_meta = getattr(message, "response_metadata", None) or {}
@@ -149,7 +139,6 @@ def _usage_from_chunk(message: Any) -> dict[str, int]:
         "input_tokens": int(input_tokens or 0),
         "output_tokens": int(output_tokens or 0),
     }
-
 
 def _stream_model(
     model: Any,
@@ -174,7 +163,6 @@ def _stream_model(
         "latency_seconds": round(time.perf_counter() - started, 3),
     }
 
-
 def _parse_json(text: str, schema: type[BaseModel]) -> BaseModel:
     value = text.strip()
     if value.startswith("```"):
@@ -184,18 +172,6 @@ def _parse_json(text: str, schema: type[BaseModel]) -> BaseModel:
     if start < 0 or end < start:
         raise ValueError("The model did not return a JSON object")
     return schema.model_validate_json(value[start : end + 1])
-
-
-def _is_gemini_model_unavailable(error: Exception) -> bool:
-    message = str(error).casefold()
-    return (
-        getattr(error, "status_code", None) == 404
-        or "404" in message
-        or "not_found" in message
-        or "not found" in message
-        or "not supported for" in message
-    )
-
 
 def _verified_profile(facts: CandidateFacts, resume_text: str) -> dict[str, Any]:
     normalized_resume = re.sub(r"\s+", " ", resume_text).casefold()
@@ -238,7 +214,6 @@ def _verified_profile(facts: CandidateFacts, resume_text: str) -> dict[str, Any]
         "source": "uploaded_pdf",
     }
 
-
 def _pdf_text(pdf_bytes: bytes) -> str:
     if not pdf_bytes.startswith(b"%PDF-"):
         raise ValueError("Uploaded document is not a PDF")
@@ -250,7 +225,6 @@ def _pdf_text(pdf_bytes: bytes) -> str:
         raise ValueError("No selectable text was found in the uploaded PDF")
     return text[:50000]
 
-
 def _pinecone_store(config: RunnableConfig, namespace: str) -> PineconeVectorStore:
     pinecone_key = _credential(config, "PINECONE_API_KEY")
     google_key = _credential(config, "GOOGLE_API_KEY")
@@ -261,7 +235,9 @@ def _pinecone_store(config: RunnableConfig, namespace: str) -> PineconeVectorSto
     if not pinecone_key or not index_name:
         raise RuntimeError("PINECONE_API_KEY and PINECONE_INDEX_NAME are required")
     if not google_key:
-        raise RuntimeError("GOOGLE_API_KEY is required for Gemini embeddings")
+        google_key = os.getenv("GEMINI_API_KEY", "")
+        if not google_key:
+             raise RuntimeError("GOOGLE_API_KEY is required for Gemini embeddings")
     embeddings = GoogleGenerativeAIEmbeddings(
         model=os.getenv("CAREEROS_EMBEDDING_MODEL", "models/gemini-embedding-001"),
         api_key=google_key,
@@ -273,26 +249,16 @@ def _pinecone_store(config: RunnableConfig, namespace: str) -> PineconeVectorSto
         namespace=namespace,
     )
 
-
 def profile_analyzer(
     state: AgentState,
     config: RunnableConfig,
 ) -> dict[str, Any]:
-    _emit("status", agent="profile_analyzer", message="Extracting resume text and verifying facts with Gemini.")
+    _emit("status", agent="profile_analyzer", message="Extracting resume text and verifying facts with Groq.")
     resume_text = _pdf_text(state["resume_pdf_bytes"])
-    google_key = _credential(config, "GOOGLE_API_KEY")
-    if not google_key:
-        raise RuntimeError("Configure GOOGLE_API_KEY in the sidebar or backend environment")
-    gemini_model = os.getenv("CAREEROS_GEMINI_MODEL", "gemini-3.8-flash").strip()
-    if gemini_model in {
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-latest",
-        "models/gemini-1.5-flash",
-        "models/gemini-1.5-flash-latest",
-        "gemini-pro",
-    }:
-        logger.warning("Configured Gemini model is retired; using gemini-3.8-flash")
-        gemini_model = "gemini-3.8-flash"
+    groq_key = _credential(config, "GROQ_API_KEY")
+    if not groq_key:
+        raise RuntimeError("Configure GROQ_API_KEY in the sidebar or backend environment")
+
     schema = json.dumps(CandidateFacts.model_json_schema(), ensure_ascii=False)
     messages = [
         SystemMessage(
@@ -304,29 +270,22 @@ def profile_analyzer(
         ),
         HumanMessage(content=resume_text),
     ]
-    response_text = ""
-    metrics: dict[str, Any] = {}
-    for model_name in dict.fromkeys((gemini_model, "gemini-3.7-flash")):
-        model = ChatGoogleGenerativeAI(
-            model=model_name,
-            api_key=google_key,
-            temperature=0,
-        )
-        try:
-            response_text, metrics = _stream_model(
-                model,
-                "profile_analyzer",
-                messages,
-                config,
-            )
-            break
-        except Exception as error:
-            if model_name == "gemini-3.7-flash" or not _is_gemini_model_unavailable(error):
-                raise
-            _emit("token_reset", agent="profile_analyzer")
-            logger.warning("Gemini model %s unavailable; retrying with gemini-3.7-flash", model_name)
+
+    model = ChatGroq(
+        model="llama-3.3-70b-versatile",
+        api_key=groq_key,
+        temperature=0,
+    )
+
+    response_text, metrics = _stream_model(
+        model,
+        "profile_analyzer",
+        messages,
+        config,
+    )
+
     if not response_text:
-        raise RuntimeError("Gemini returned no profile extraction output")
+        raise RuntimeError("Groq returned no profile extraction output")
     facts = _parse_json(response_text, CandidateFacts)
     profile = _verified_profile(facts, resume_text)
 
@@ -343,7 +302,6 @@ def profile_analyzer(
         "agent_metrics": {"profile_analyzer": metrics},
     }
 
-
 def _remaining_budget(headers: Any) -> int | None:
     for name in (
         "x-ratelimit-remaining",
@@ -355,7 +313,6 @@ def _remaining_budget(headers: Any) -> int | None:
         if value and str(value).isdigit():
             return int(value)
     return None
-
 
 def _normalize_job(
     title: str,
@@ -392,7 +349,6 @@ def _normalize_job(
     if workplace_type:
         job["workplace_type"] = workplace_type
     return job
-
 
 def _fetch_adzuna(
     role: str,
@@ -458,7 +414,6 @@ def _fetch_adzuna(
             "latency_seconds": round(time.perf_counter() - started, 3),
             "calls": 1,
         }
-
 
 def _fetch_jsearch(
     role: str,
@@ -530,7 +485,6 @@ def _fetch_jsearch(
             "calls": 1,
         }
 
-
 def _fetch_company_research(
     jobs: list[dict[str, Any]],
     config: RunnableConfig,
@@ -576,7 +530,6 @@ def _fetch_company_research(
             logger.warning("Company research failed for %s: %s", job["company"], type(error).__name__)
             results.append({"company": job["company"], "status": "unavailable", "results": []})
     return results
-
 
 def job_scout(
     state: AgentState,
@@ -644,7 +597,6 @@ def job_scout(
         },
     }
 
-
 def _retrieve_profile_facts(
     state: AgentState,
     config: RunnableConfig,
@@ -661,7 +613,6 @@ def _retrieve_profile_facts(
         raise RuntimeError("Pinecone returned no verified candidate profile facts")
     return "\n".join(document.page_content for document in documents)
 
-
 def _groq_model(config: RunnableConfig) -> ChatGroq:
     api_key = _credential(config, "GROQ_API_KEY")
     if not api_key:
@@ -671,7 +622,6 @@ def _groq_model(config: RunnableConfig) -> ChatGroq:
         api_key=api_key,
         temperature=0.2,
     )
-
 
 def tailor_agent(
     state: AgentState,
@@ -739,7 +689,6 @@ def tailor_agent(
         },
     }
 
-
 def outreach_agent(
     state: AgentState,
     config: RunnableConfig,
@@ -777,7 +726,6 @@ def outreach_agent(
         raise RuntimeError("Groq returned an empty outreach draft")
     return {"outreach_draft": draft, "agent_metrics": {"outreach_agent": metrics}}
 
-
 def interview_prep_agent(
     state: AgentState,
     config: RunnableConfig,
@@ -801,15 +749,15 @@ def interview_prep_agent(
             ),
             HumanMessage(
                 content=json.dumps(
-                    {
-                        "job": job,
-                        "verified_profile": state["profile_data"],
-                        "company_research": [
-                            item for item in state.get("company_research", [])
-                            if item.get("company") == job.get("company")
-                        ],
-                    },
-                    ensure_ascii=False,
+                {
+                    "job": job,
+                    "verified_profile": state["profile_data"],
+                    "company_research": [
+                        item for item in state.get("company_research", [])
+                        if item.get("company") == job.get("company")
+                    ],
+                },
+                ensure_ascii=False,
                 )
             ),
         ],
@@ -821,7 +769,6 @@ def interview_prep_agent(
         "technical_challenges": result.technical_challenges,
         "agent_metrics": {"interview_prep_agent": metrics},
     }
-
 
 def z_axis_approval_gate(
     state: AgentState,
@@ -838,7 +785,6 @@ def z_axis_approval_gate(
     )
     return {"z_axis_approved": approval is True}
 
-
 def verification_agent(
     state: AgentState,
     config: RunnableConfig,
@@ -846,7 +792,6 @@ def verification_agent(
     job = state["job_listings"][0]
     _emit("status", agent="verification_agent", message="Performing final Y-Axis truth check for fabrication.")
     model = _groq_model(config)
-
     verification_prompt = (
         "You are the Y-Axis Truth Guardian. Your sole purpose is to prevent AI hallucinations.\n\n"
         "COMPARE the following tailored materials against the verified candidate profile.\n\n"
@@ -862,22 +807,18 @@ def verification_agent(
         "3. Return JSON: {'verified': bool, 'issues': list[str], 'confidence': float}\n"
         "Return ONLY JSON."
     )
-
     text, metrics = _stream_model(
         model,
         "verification_agent",
         [SystemMessage(content="You are a strict truth-verification agent. Zero tolerance for fabrication."), HumanMessage(content=verification_prompt)],
         config,
     )
-
     try:
         result = _parse_json(text, BaseModel) # Using generic BaseModel since we only need a dict
-        # Simple validation of the result
         is_verified = result.get("verified", False)
         if not is_verified:
             _emit("status", agent="verification_agent", message=f"Fabrication detected: {result.get('issues', 'Unknown issues')}")
             raise RuntimeError(f"Y-Axis Verification Failed: {result.get('issues', 'Fabrication detected in tailored materials.')}")
-
         _emit("status", agent="verification_agent", message="Materials verified as truthful.")
         return {"agent_metrics": {"verification_agent": metrics}}
     except Exception as e:
@@ -885,7 +826,6 @@ def verification_agent(
             raise
         logger.exception("Verification agent parsing failed")
         raise RuntimeError("Verification agent crashed while checking for hallucinations")
-
 
 def rpa_submission_node(
     state: AgentState,
