@@ -4,11 +4,14 @@
 
 **PakAngels Cohort 11 Hackathon | Team CareerOS**
 
+[![Live Demo](https://img.shields.io/badge/Deploy-Live_App-brightgreen?style=for-the-badge&logo=streamlit)](https://career-os-290405.streamlit.app/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js-111111?style=for-the-badge&logo=nextdotjs)](https://nextjs.org/)
 [![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-4B0082?style=for-the-badge)](https://langchain-ai.github.io/langgraph/)
 [![Playwright](https://img.shields.io/badge/RPA-Playwright-2EAD33?style=for-the-badge&logo=playwright)](https://playwright.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+
+<img src="https://img.shields.io/badge/Status-Deployed_to_Streamlit_Cloud-blue?style=for-the-badge" alt="Status">
 
 > **CareerOS** is a governed career operations workspace. It verifies resume facts, sources live opportunities, generates tailored application materials, and prepares application forms in a visible browser. A human reviews and completes every final submission.
 
@@ -178,6 +181,7 @@ npm run dev
 The UI opens at `http://localhost:3000`. The same-origin Next.js API route proxies to `CAREEROS_BACKEND_URL` (default `http://127.0.0.1:8000`).
 
 Create the Pinecone index with the dimension required by the configured Gemini embedding model (`gemini-embedding-001` defaults to 3072 dimensions). Set `PINECONE_INDEX_NAME` and `PINECONE_API_KEY` in the backend environment or enter them in System Credentials.
+
 For Resend delivery, configure a verified `RESEND_FROM_EMAIL`. Point Resend webhooks at `POST /webhooks/resend` and configure its signing secret as `RESEND_WEBHOOK_SECRET`; the endpoint verifies Svix signatures and records delivery/open/click events.
 
 ### 6. Using CareerOS
@@ -210,24 +214,10 @@ Career-OS/
 
 ---
 
-## ☁️ Cloud Deployment (Azure)
+## ☁️ Cloud Deployment
 
-CareerOS is configured for automated CI/CD deployment via GitHub Actions:
-
-- **Backend (FastAPI)** → Azure Container Apps (serverless, scales to zero)
-- **Frontend (Next.js)** → Azure Web Apps (Node container, port 3000)
-
-See `.github/workflows/` for the full CI/CD pipeline configuration.
-
-Required GitHub Secrets:
-
-| Secret | Description |
-|---|---|
-| `AZURE_CREDENTIALS` | Azure Service Principal JSON |
-| `REGISTRY_LOGIN_SERVER` | Azure Container Registry URL |
-| `REGISTRY_USERNAME` | ACR username |
-| `REGISTRY_PASSWORD` | ACR password |
-| `AZURE_WEBAPP_PUBLISH_PROFILE` | Azure Web App publish profile XML |
+CareerOS is deployed via Streamlit Cloud for the hackathon demo:
+👉 **[Live Demo Link](https://career-os-290405.streamlit.app/)**
 
 ---
 
