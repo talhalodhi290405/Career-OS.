@@ -50,6 +50,7 @@ for key, value in {
     "ats_score": 0,
     "pipeline_ready": False,
     "pipeline_error": "",
+    "pipeline_events": [],
     "live_agent_text": {},
     "thread_id": "",
     "rpa_result": {},
@@ -356,7 +357,7 @@ if navigation == "Dynamic Dashboard":
     elif st.session_state["pipeline_error"]:
         st.error(st.session_state["pipeline_error"])
 
-    if st.session_state["pipeline_events"]:
+    if st.session_state.get("pipeline_events", []):
         with event_output:
             for item in st.session_state["pipeline_events"][-18:]:
                 st.caption(f"{str(item['node']).replace('_', ' ').title()} · {item['status']}")
@@ -413,7 +414,7 @@ elif navigation == "Control Tower":
     _render_metrics()
     if st.session_state["rpa_result"]:
         st.write(st.session_state["rpa_result"].get("message", "Browser preparation complete."))
-    if st.session_state["pipeline_events"]:
+    if st.session_state.get("pipeline_events", []):
         st.subheader("Run trace")
         for item in st.session_state["pipeline_events"][-30:]:
             st.markdown(f"`{str(item['node']).replace('_', ' ').title()}` · {item['status']}")
