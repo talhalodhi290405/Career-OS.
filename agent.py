@@ -306,9 +306,17 @@ def profile_analyzer(
         config,
     )
 
+    fallback_name = next((line.strip() for line in resume_text.splitlines() if line.strip()), "")
+    fallback_evidence = [resume_text[:500]] if resume_text else ["Resume text extracted."]
     if not response_text:
-        raise RuntimeError("Groq returned no profile extraction output")
-    facts = _parse_json(response_text, CandidateFacts)
+        facts = CandidateFacts(name=fallback_name, evidence=fallback_evidence, summary=resume_text[:1200])
+    else:
+        try:
+            facts = _parse_json(response_text, CandidateFacts)
+            if not facts.name.strip() or not facts.evidence:
+                raise ValueError("Incomplete profile facts")
+        except Exception:
+            facts = CandidateFacts(name=fallback_name, evidence=fallback_evidence, summary=resume_text[:1200])
     profile = _verified_profile(facts, resume_text)
 
     namespace = f"careeros-{state['run_id']}"
