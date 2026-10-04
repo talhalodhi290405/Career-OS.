@@ -887,6 +887,13 @@ def verification_agent(
         raise RuntimeError("Verification agent crashed while checking for hallucinations")
 
 
+def rpa_submission_node(
+    state: AgentState,
+    config: RunnableConfig,
+) -> dict[str, Any]:
+    _emit("status", agent="rpa_agent", message="Submitting application via cloud demo simulation...")
+    return {"application_status": "Simulated Success for Cloud Demo"}
+
 _builder = StateGraph(AgentState)
 _builder.add_node("profile_analyzer", profile_analyzer)
 _builder.add_node("job_scout", job_scout)
