@@ -894,6 +894,11 @@ def rpa_submission_node(
     _emit("status", agent="rpa_agent", message="Submitting application via cloud demo simulation...")
     return {"application_status": "Simulated Success for Cloud Demo"}
 
+def _approval_route(state: AgentState) -> str:
+    if state.get("z_axis_approved") is True:
+        return "approved"
+    return "approval_required"
+
 _builder = StateGraph(AgentState)
 _builder.add_node("profile_analyzer", profile_analyzer)
 _builder.add_node("job_scout", job_scout)
