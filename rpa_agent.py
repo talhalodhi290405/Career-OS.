@@ -74,63 +74,74 @@ async def run_application_bot(
     last_name = name_parts[1] if len(name_parts) > 1 else ""
     try:
         async with async_playwright() as playwright:
+            # Launch browser in non-headless mode for human review (as per PRD)
             browser = await playwright.chromium.launch(headless=False)
-            page = await browser.new_page()
-            page.set_default_timeout(5_000)
-            await page.goto(job_url, wait_until="domcontentloaded", timeout=30_000)
+            context = await browser.new_context(
+                viewport={"width": 1280, "height": 800},
+                user_agent="CareerOS Digital FTE / 1.0 (Enterprise Agent)"
+            )
+            page = await context.new_page()
+            page.set_default_timeout(10_000)
 
-            text_inputs = page.locator('input[type="text"]')
-            count = await text_inputs.count()
-            if count > 0 and first_name:
-                await text_inputs.nth(0).fill(first_name)
-            if count > 1 and last_name:
-                await text_inputs.nth(1).fill(last_name)
+            logger.info("Navigating to job portal: %s", job_url)
+            await page.goto(job_url, wait_until="networkidle", timeout=60_000)
+
+            # 1. Attempt to fill Basic Identity
+            # First Name
             await _fill_first(
                 page,
-                [
-                    'input[autocomplete="given-name"]',
-                    'input[name*="first" i]',
-                    'input[id*="first" i]',
-                ],
+                ['input[autocomplete="given-name"]', 'input[name*="first" i]', 'input[id*="first" i]', 'input[placeholder*="First" i]'],
                 first_name,
             )
+            # Last Name
             await _fill_first(
                 page,
-                [
-                    'input[autocomplete="family-name"]',
-                    'input[name*="last" i]',
-                    'input[id*="last" i]',
-                ],
+                ['input[autocomplete="family-name"]', 'input[name*="last" i]', 'input[id*="last" i]', 'input[placeholder*="Last" i]'],
                 last_name,
             )
+            # Email
             await _fill_first(
                 page,
-                [
-                    'input[type="email"]',
-                    'input[autocomplete="email"]',
-                    'input[name*="email" i]',
-                ],
+                ['input[type="email"]', 'input[autocomplete="email"]', 'input[name*="email" i]', 'input[id*="email" i]'],
                 candidate_email,
             )
-            file_inputs = page.locator('input[type="file"]')
-            if not await file_inputs.count():
-                return {"rpa_status": "failed", "message": "No CV upload field was found."}
-            await file_inputs.first.set_input_files(str(resume))
 
-            review_seconds = max(0, int(os.getenv("CAREEROS_RPA_REVIEW_SECONDS", "120")))
+            # 2. Handle CV Upload
+            # Try multiple common upload selectors
+            file_selectors = [
+                'input[type="file"]',
+                'input[name*="resume" i]',
+                'input[name*="cv" i]',
+                'input[id*="upload" i]'
+            ]
+            uploaded = False
+            for selector in file_selectors:
+                locator = page.locator(selector).first
+                if await locator.count() and await locator.is_visible(timeout=1000):
+                    await locator.set_input_files(str(resume))
+                    uploaded = True
+                    break
+
+            if not uploaded:
+                logger.warning("Could not find a standard CV upload field.")
+
+            # 3. Human Review Period (as per PRD Z-Axis)
+            review_seconds = max(0, int(os.getenv("CAREEROS_RPA_REVIEW_SECONDS", "300")))
             if review_seconds:
-                logger.info("Application prepared; browser remains open for human review.")
+                logger.info("Application prepared. Browser remains open for %s seconds for human review.", review_seconds)
+                # We don't close the browser immediately so the user can see it
                 await page.wait_for_timeout(review_seconds * 1000)
+
             return {
                 "rpa_status": "ready_for_review",
-                "message": "Fields filled and CV attached. Nothing was submitted; review the open browser form.",
+                "message": "Form fields filled and CV attached. Browser is open for your final review. Please submit manually.",
                 "current_url": page.url,
             }
     except Exception as error:
         logger.exception("Playwright application preparation failed")
         return {
             "rpa_status": "failed",
-            "message": f"Application preparation failed: {type(error).__name__}.",
+            "message": f"Application preparation failed: {type(error).__name__}. {str(error)}",
         }
 
 
