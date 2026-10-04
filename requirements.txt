@@ -3,6 +3,7 @@ fastapi
 uvicorn
 langgraph
 langchain
+langchain-google-genai
 google-generativeai
 groq
 pydantic
