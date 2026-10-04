@@ -9,10 +9,13 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
-
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 logger = logging.getLogger("careeros.rpa")
 
+# Initialize LLM for Agentic Decision Making
+llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro")
 
 def _is_public_http_url(url: str) -> bool:
     try:
@@ -36,20 +39,26 @@ def _is_public_http_url(url: str) -> bool:
     except (ValueError, OSError):
         return False
 
+async def _get_page_state(page):
+    """Captures the current state of the page for the LLM to reason about."""
+    content = await page.content()
+    # In a production environment, we would simplify the DOM here to save tokens
+    return content[:10000] # Truncated for stability
 
-async def _fill_first(page, selectors: list[str], value: str) -> bool:
-    if not value:
-        return False
-    for selector in selectors:
+async def _execute_action(page, action_type: str, selector: str, value: str = ""):
+    """Executes a specific browser action."""
+    try:
         locator = page.locator(selector).first
-        try:
-            if await locator.count() and await locator.is_visible(timeout=500):
-                await locator.fill(value, timeout=2_000)
-                return True
-        except PlaywrightTimeoutError:
-            continue
-    return False
-
+        if action_type == "fill":
+            await locator.fill(value, timeout=5000)
+        elif action_type == "click":
+            await locator.click(timeout=5000)
+        elif action_type == "upload":
+            await locator.set_input_files(value, timeout=5000)
+        return True
+    except Exception as e:
+        logger.error(f"Action {action_type} failed on {selector}: {e}")
+        return False
 
 async def run_application_bot(
     cv_path: str,
@@ -59,7 +68,7 @@ async def run_application_bot(
     candidate_email: str = "",
     z_axis_approved: bool = False,
 ) -> dict[str, str]:
-    """Prepare a public application form and stop before its submit control."""
+    """Agentic Browser RPA loop: Observe -> Reason -> Act."""
     if z_axis_approved is not True:
         return {"rpa_status": "blocked", "message": "Z-Axis approval is required."}
 
@@ -69,81 +78,83 @@ async def run_application_bot(
     if not _is_public_http_url(job_url):
         return {"rpa_status": "failed", "message": "A public HTTP(S) application URL is required."}
 
-    name_parts = candidate_name.strip().split(maxsplit=1)
-    first_name = name_parts[0] if name_parts else ""
-    last_name = name_parts[1] if len(name_parts) > 1 else ""
     try:
         async with async_playwright() as playwright:
-            # Launch browser in non-headless mode for human review (as per PRD)
             browser = await playwright.chromium.launch(headless=False)
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 800},
-                user_agent="CareerOS Digital FTE / 1.0 (Enterprise Agent)"
+                user_agent="CareerOS Digital FTE / 1.0 (Agentic RPA)"
             )
             page = await context.new_page()
-            page.set_default_timeout(10_000)
+            page.set_default_timeout(15_000)
 
             logger.info("Navigating to job portal: %s", job_url)
             await page.goto(job_url, wait_until="networkidle", timeout=60_000)
 
-            # 1. Attempt to fill Basic Identity
-            # First Name
-            await _fill_first(
-                page,
-                ['input[autocomplete="given-name"]', 'input[name*="first" i]', 'input[id*="first" i]', 'input[placeholder*="First" i]'],
-                first_name,
-            )
-            # Last Name
-            await _fill_first(
-                page,
-                ['input[autocomplete="family-name"]', 'input[name*="last" i]', 'input[id*="last" i]', 'input[placeholder*="Last" i]'],
-                last_name,
-            )
-            # Email
-            await _fill_first(
-                page,
-                ['input[type="email"]', 'input[autocomplete="email"]', 'input[name*="email" i]', 'input[id*="email" i]'],
-                candidate_email,
-            )
+            # Agentic Loop
+            max_iterations = 15
+            for i in range(max_iterations):
+                state = await _get_page_state(page)
 
-            # 2. Handle CV Upload
-            # Try multiple common upload selectors
-            file_selectors = [
-                'input[type="file"]',
-                'input[name*="resume" i]',
-                'input[name*="cv" i]',
-                'input[id*="upload" i]'
-            ]
-            uploaded = False
-            for selector in file_selectors:
-                locator = page.locator(selector).first
-                if await locator.count() and await locator.is_visible(timeout=1000):
-                    await locator.set_input_files(str(resume))
-                    uploaded = True
+                prompt = f"""
+                You are a Job Application Agent.
+                Current Page HTML snippet: {state}
+                Candidate Data: Name={candidate_name}, Email={candidate_email}, ResumePath={str(resume)}
+
+                Goal: Fill out the application form and upload the resume.
+                STOP when the form is filled and only the 'Submit' button remains.
+
+                Respond ONLY in JSON format:
+                {{
+                    "action": "fill" | "click" | "upload" | "done",
+                    "selector": "CSS selector",
+                    "value": "text to fill or path to upload",
+                    "reason": "why this action"
+                }}
+                """
+
+                response = await llm.ainvoke([
+                    SystemMessage(content="You are a high-precision RPA agent."),
+                    HumanMessage(content=prompt)
+                ])
+
+                # Parse response (assuming JSON output from LLM)
+                import json
+                try:
+                    decision = json.loads(response.content)
+                except:
+                    logger.error("LLM failed to provide valid JSON. Retrying...")
+                    continue
+
+                if decision["action"] == "done":
                     break
 
-            if not uploaded:
-                logger.warning("Could not find a standard CV upload field.")
+                success = await _execute_action(
+                    page,
+                    decision["action"],
+                    decision["selector"],
+                    decision.get("value", "")
+                )
 
-            # 3. Human Review Period (as per PRD Z-Axis)
+                if not success:
+                    logger.warning(f"Iteration {i}: Action {decision['action']} failed. Re-evaluating.")
+
             review_seconds = max(0, int(os.getenv("CAREEROS_RPA_REVIEW_SECONDS", "300")))
             if review_seconds:
-                logger.info("Application prepared. Browser remains open for %s seconds for human review.", review_seconds)
-                # We don't close the browser immediately so the user can see it
+                logger.info("Agentic preparation complete. Browser open for human review.")
                 await page.wait_for_timeout(review_seconds * 1000)
 
             return {
                 "rpa_status": "ready_for_review",
-                "message": "Form fields filled and CV attached. Browser is open for your final review. Please submit manually.",
+                "message": "Agentic RPA has filled the form. Please review and submit manually.",
                 "current_url": page.url,
             }
     except Exception as error:
-        logger.exception("Playwright application preparation failed")
+        logger.exception("Agentic Playwright failed")
         return {
             "rpa_status": "failed",
-            "message": f"Application preparation failed: {type(error).__name__}. {str(error)}",
+            "message": f"Agentic RPA failed: {type(error).__name__}. {str(error)}",
         }
-
 
 if __name__ == "__main__":
     result = asyncio.run(
