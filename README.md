@@ -5,12 +5,12 @@
 **PakAngels Cohort 11 Hackathon | Team CareerOS**
 
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
-[![Streamlit](https://img.shields.io/badge/Frontend-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit)](https://streamlit.io/)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js-111111?style=for-the-badge&logo=nextdotjs)](https://nextjs.org/)
 [![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-4B0082?style=for-the-badge)](https://langchain-ai.github.io/langgraph/)
 [![Playwright](https://img.shields.io/badge/RPA-Playwright-2EAD33?style=for-the-badge&logo=playwright)](https://playwright.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-> **CareerOS** is the world's first Autonomous Digital Full-Time Employee (FTE) for job acquisition — a self-operating AI system that scouts live remote roles, analyzes your profile, drafts personalized outreach, and physically submits applications through a governed RPA pipeline, all under strict human oversight.
+> **CareerOS** is a governed career operations workspace. It verifies resume facts, sources live opportunities, generates tailored application materials, and prepares application forms in a visible browser. A human reviews and completes every final submission.
 
 </div>
 
@@ -27,26 +27,18 @@ CareerOS functions as your autonomous agent: a digital FTE that works 24/7, appl
 ## 🏗️ System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     CAREEROS PIPELINE                           │
-│                                                                 │
-│  ┌──────────┐    ┌───────────┐    ┌──────────┐    ┌─────────┐  │
-│  │  Scout   │───▶│ Analyzer  │───▶│ Outreach │───▶│  RPA    │  │
-│  │  Agent   │    │  Agent    │    │  Agent   │    │  Agent  │  │
-│  │ (X-Axis) │    │ (X-Axis)  │    │ (Y-Axis) │    │(Z-Axis) │  │
-│  └──────────┘    └───────────┘    └──────────┘    └────┬────┘  │
-│  Remotive API    pdfplumber +      Local Llama 3   Playwright  │
-│                  Local Llama 3                      (Blocked)  │
-│                                                         │       │
-│                                              ┌──────────▼────┐  │
-│                                              │  Z-AXIS GATE  │  │
-│                                              │ Human Approval│  │
-│                                              │  Required ⚠️  │  │
-│                                              └───────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-         │                                        │
-   FastAPI (SSE)                           Streamlit UI
-   Port 8000                               Port 8501
+Next.js 16 + React 19 control plane (port 3000)
+    ├─ same-origin SSE/API proxy
+    ├─ X/Y/Z review modules
+    └─ request-scoped provider credentials
+                                    │
+                                    ▼
+FastAPI multipart/SSE backend (port 8000) + LangGraph per-run checkpoint
+    Gemini/PDF facts ─> Adzuna + JSearch ─> Pinecone RAG ─> Groq CV/letter/outreach/STAR
+                                                                                                                │
+                                                                                    Z-Axis interrupt / human review
+                                                                                                                │
+                                                     visible Playwright form preparation (never auto-submits)
 ```
 
 ---
@@ -58,7 +50,7 @@ CareerOS is built on a first-principles Human-in-the-Loop (HITL) governance mode
 ### X-Axis — Candidate Truth Layer
 > **"What is objectively true about the candidate?"**
 
-- Governed by the **Profile Analyzer Agent** using `pdfplumber` + local **Llama 3**
+- Governed by the **Profile Analyzer Agent** using `pdfplumber`, Gemini, Pydantic validation, and source-text checks
 - Extracts verifiable facts: top technical skills, years of experience, domain expertise
 - Feeds only grounded, factual data to downstream agents — no hallucinations about the candidate's profile are permitted to propagate
 - **Constraint**: The Outreach Agent is forbidden from claiming skills not present in the X-Axis fact set
@@ -66,8 +58,8 @@ CareerOS is built on a first-principles Human-in-the-Loop (HITL) governance mode
 ### Y-Axis — Opportunity Matching Layer
 > **"What is the best-fit opportunity, and how do we communicate value?"**
 
-- Governed by the **Scout Agent** (live Remotive API) + **Outreach Agent** (Llama 3)
-- Scout queries live remote job boards and returns ranked, real opportunities
+- Governed by the **Scout Agent** (Adzuna + JSearch) and Groq-powered content agents
+- Scout queries live roles by target role, location, and remote/hybrid/on-site preference
 - Outreach Agent tailors the communication to the specific role and company — personalized, not generic
 - **Constraint**: All Y-Axis output is staged for review before any action is taken
 
@@ -88,10 +80,11 @@ This framework ensures CareerOS is powerful but never reckless — the system is
 
 | Agent | Technology | Responsibility |
 |---|---|---|
-| **Scout** | Remotive REST API + `httpx` | Queries live remote job board, returns top 3 ranked matches |
-| **Profile Analyzer** | `pdfplumber` + local Llama 3 (via Ollama) | Extracts X-Axis candidate facts from uploaded PDF resume |
-| **Outreach** | Local Llama 3 (via Ollama) | Drafts Y-Axis personalized cold outreach email per role |
-| **RPA Executor** | `playwright` (async headless Chromium) | Navigates job portal DOM, fills fields, uploads PDF, submits |
+| **Scout** | Adzuna + JSearch REST APIs | Queries and normalizes live roles across location/work modes |
+| **Profile Analyzer** | `pdfplumber` + Gemini Flash + Pydantic | Extracts and verifies X-Axis candidate facts from the uploaded resume |
+| **RAG** | Pinecone + Gemini embeddings | Stores and retrieves verified candidate facts per run |
+| **Tailor / Outreach / Prep** | Groq Llama 3 | Generates a tailored CV, cover letter, outreach, and STAR prompts |
+| **RPA Executor** | `playwright.async_api` (visible Chromium) | Fills common fields and attaches a CV, then pauses before submission |
 
 ---
 
@@ -101,11 +94,12 @@ This framework ensures CareerOS is powerful but never reckless — the system is
 |---|---|
 | **Orchestration** | LangGraph multi-agent state machine |
 | **Backend API** | FastAPI with `StreamingResponse` (NDJSON/SSE) |
-| **Frontend** | Streamlit with native containers and live streaming |
-| **LLM** | Local Llama 3 via Ollama (zero API cost, full privacy) |
+| **Frontend** | Next.js 16 App Router + React 19 + TypeScript |
+| **LLMs** | Gemini Flash for extraction; Groq Llama 3 for tailored content |
+| **Vector retrieval** | Pinecone with Gemini embeddings, namespaced by pipeline run |
 | **PDF Parsing** | `pdfplumber` |
-| **RPA Browser** | Playwright async (headless Chromium) |
-| **Job Discovery** | Remotive public API |
+| **RPA Browser** | Playwright async (visible Chromium; pauses before submit) |
+| **Job Discovery** | Adzuna + JSearch |
 
 ---
 
@@ -114,7 +108,7 @@ This framework ensures CareerOS is powerful but never reckless — the system is
 ### Prerequisites
 
 - Python 3.11+
-- [Ollama](https://ollama.ai/) installed with `llama3` model pulled: `ollama pull llama3`
+- Node.js 22+
 - Playwright browsers installed: `playwright install chromium`
 
 ### 1. Clone & Install
@@ -136,9 +130,17 @@ pip install -r requirements.txt
 Create a `.env` file in the project root (this file is gitignored — never commit it):
 
 ```env
-# Optional: Only needed if using cloud LLM providers instead of local Ollama
-# GROQ_API_KEY=your_key_here
-# GOOGLE_API_KEY=your_key_here
+# Gemini, Groq, and Pinecone
+# GEMINI_API_KEY=...
+# GROQ_API_KEY=...
+# PINECONE_API_KEY=...
+# PINECONE_INDEX_NAME=...
+# Adzuna and JSearch
+# ADZUNA_APP_ID=...
+# ADZUNA_APP_KEY=...
+# JSEARCH_API_KEY=...
+# Backend URL for the Next.js server-side proxy
+# CAREEROS_BACKEND_URL=http://127.0.0.1:8000
 ```
 
 ### 3. Place Your Resume
@@ -158,22 +160,23 @@ INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 INFO:     Application startup complete.
 ```
 
-### 5. Start the Streamlit Frontend
+### 5. Start the Next.js Frontend
 
 ```bash
-# In Terminal 2
-streamlit run app.py
+cd frontend
+npm ci
+npm run dev
 ```
 
-The UI will open at `http://localhost:8501`.
+The UI opens at `http://localhost:3000`. The same-origin Next.js API route proxies to `CAREEROS_BACKEND_URL` (default `http://127.0.0.1:8000`).
 
 ### 6. Using CareerOS
 
-1. Enter your target role (e.g., `"AI Engineer"`, `"Python Developer"`)
-2. Click **"Fire Autonomous Pipeline"** — watch the live SSE stream as each agent activates
-3. Review the Scout's live job intelligence, the Analyzer's X-Axis profile facts, and the Outreach draft
-4. When the pipeline completes, the **"Authorize Playwright RPA"** button activates in the **Control Tower**
-5. Click to grant Z-Axis approval — the headless browser launches and submits your application
+1. Choose a target role, location, and remote/hybrid/on-site mode, then upload a resume.
+2. Start the pipeline and watch live agent tokens, provider statuses, and job results.
+3. Review verified profile facts, live listings, tailored CV, cover letter, outreach, and interview prompts.
+4. Authorize Playwright from the Control Tower to open the application form visibly, fill detected fields, and attach the CV.
+5. Review and submit the application yourself; the automation deliberately stops before clicking submit.
 
 ---
 
@@ -184,11 +187,11 @@ Career-OS/
 ├── main.py            # FastAPI backend — SSE streaming endpoint + RPA trigger
 ├── agent.py           # LangGraph agents: Profile Analyzer + Outreach
 ├── rpa_agent.py       # Playwright RPA executor with Z-Axis gate
-├── app.py             # Streamlit frontend — live dashboard + Control Tower
+├── frontend/          # Next.js/React control plane and same-origin API/SSE proxy
 ├── requirements.txt   # Python dependencies
 ├── .gitignore         # Excludes .venv, .env, PDFs, __pycache__
 ├── Dockerfile.backend # Docker config for FastAPI backend
-├── Dockerfile.frontend # Docker config for Streamlit UI
+├── Dockerfile.frontend # Docker config for Next.js standalone server
 └── .github/
     └── workflows/
         ├── deploy-backend.yml   # CI/CD → Azure Container Apps
@@ -202,7 +205,7 @@ Career-OS/
 CareerOS is configured for automated CI/CD deployment via GitHub Actions:
 
 - **Backend (FastAPI)** → Azure Container Apps (serverless, scales to zero)
-- **Frontend (Streamlit)** → Azure Web Apps (always-on, custom domain ready)
+- **Frontend (Next.js)** → Azure Web Apps (Node container, port 3000)
 
 See `.github/workflows/` for the full CI/CD pipeline configuration.
 

@@ -28,6 +28,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install --with-deps chromium \
+    && chmod -R a+rX /ms-playwright
+
 # Copy application code (NOT .env, NOT .venv, NOT *.pdf — honoured by .dockerignore)
 COPY main.py agent.py rpa_agent.py ./
 
@@ -43,4 +47,4 @@ RUN adduser --disabled-password --gecos "" careeros
 USER careeros
 
 # Start Uvicorn — bind to 0.0.0.0 so ACA can route traffic
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

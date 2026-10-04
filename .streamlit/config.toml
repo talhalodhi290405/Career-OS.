@@ -1,0 +1,31 @@
+[theme]
+base = "dark"
+primaryColor = "#FF3131"
+backgroundColor = "#2A0B14"
+secondaryBackgroundColor = "#43111F"
+textColor = "#FFF8FA"
+font = "sans serif"
+
+[theme.dark]
+primaryColor = "#FF3131"
+backgroundColor = "#2A0B14"
+secondaryBackgroundColor = "#43111F"
+textColor = "#FFF8FA"
+borderColor = "#7A2E42"
+dataframeHeaderBackgroundColor = "#541827"
+dataframeHeaderTextColor = "#FFF8FA"
+
+[theme.light]
+primaryColor = "#8B1E3F"
+backgroundColor = "#F7F1E8"
+secondaryBackgroundColor = "#EEE5D9"
+textColor = "#33252A"
+borderColor = "#D8C8BC"
+dataframeHeaderBackgroundColor = "#E8DCCE"
+dataframeHeaderTextColor = "#33252A"
+
+[server]
+maxUploadSize = 12
+
+[browser]
+gatherUsageStats = false

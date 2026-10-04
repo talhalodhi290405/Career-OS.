@@ -1,54 +1,26 @@
-# ── Stage 1: Builder ─────────────────────────────────────────────────────────
-FROM python:3.11-slim AS builder
-
+FROM node:22-alpine AS dependencies
 WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
-
-# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
-FROM python:3.11-slim AS runtime
-
+FROM node:22-alpine AS builder
 WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY frontend/ ./
+RUN npm run build
 
-# Copy packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Copy only the Streamlit app
-COPY app.py ./
-
-# Streamlit configuration — disable telemetry and set server options
-RUN mkdir -p /app/.streamlit
-COPY <<'EOF' /app/.streamlit/config.toml
-[server]
-port = 8501
-address = "0.0.0.0"
-headless = true
-enableCORS = false
-enableXsrfProtection = false
-
-[browser]
-gatherUsageStats = false
-
-[theme]
-primaryColor = "#6C63FF"
-backgroundColor = "#0E1117"
-secondaryBackgroundColor = "#1A1D2E"
-textColor = "#FFFFFF"
-EOF
-
-EXPOSE 8501
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"
-
-RUN adduser --disabled-password --gecos "" careeros
-USER careeros
-
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+RUN addgroup -S nextjs && adduser -S nextjs -G nextjs
+COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
+USER nextjs
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "server.js"]
