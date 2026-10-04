@@ -62,7 +62,7 @@ class CandidateFacts(BaseModel):
     name: str
     email: str | None = None
     phone: str | None = None
-    headline: str
+    headline: str = ""
     skills: list[str]
     experience_years: int | None = None
     summary: str
@@ -77,7 +77,7 @@ class VerificationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     verified: bool
     issues: list[str] = Field(default_factory=list)
-    confidence: float = Field(ge=0, le=1)
+    confidence: float = Field(default=0.0, ge=0, le=1)
 
 def create_initial_state() -> AgentState:
     return {
