@@ -49,7 +49,7 @@ app = FastAPI(title="CareerOS Streaming Backend")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -511,4 +511,7 @@ async def outreach_analytics(
         "opened": events.get("email.opened", 0),
         "clicked": events.get("email.clicked", 0),
         "bounced": events.get("email.bounced", 0),
-    }
+    }import uvicorn
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
