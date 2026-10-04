@@ -139,6 +139,8 @@ button { color: inherit; }
 .field input[type="file"] { padding: 7px; font-size: 10px; }
 .field input[type="range"] { height: 20px; padding: 0; accent-color: var(--accent); }
 .form-bottom { display: flex; align-items: center; gap: 14px; margin-top: 16px; }
+.consent-row { display: flex; align-items: flex-start; gap: 9px; margin: 14px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.consent-row input { margin-top: 2px; accent-color: var(--accent); }
 .error-banner, .success-banner, .notice-banner { margin: 14px 0; padding: 12px 14px; border-radius: 9px; font-size: 12px; line-height: 1.55; }
 .error-banner { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); }
 .success-banner { color: var(--good); background: color-mix(in srgb, var(--good) 9%, transparent); border: 1px solid color-mix(in srgb, var(--good) 25%, transparent); }

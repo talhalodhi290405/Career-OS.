@@ -56,7 +56,8 @@ class AgentState(TypedDict):
     agent_metrics: Annotated[dict[str, dict[str, Any]], operator.or_]
     api_metrics: Annotated[dict[str, dict[str, Any]], operator.or_]
     ats_score: int
-
+    company_research: list[dict[str, Any]]
+    technical_challenges: list[str]
 
 class CandidateFacts(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -73,12 +74,15 @@ class CandidateFacts(BaseModel):
 class InterviewQuestions(BaseModel):
     model_config = ConfigDict(extra="forbid")
     questions: list[str] = Field(min_length=4, max_length=8)
+    technical_challenges: list[str] = Field(min_length=1, max_length=5)
 
 
 def create_initial_state() -> AgentState:
     return {
         "profile_data": {},
         "job_listings": [],
+        "company_research": [],
+        "technical_challenges": [],
         "tailored_cv": "",
         "tailored_cv_path": "",
         "cover_letter": "",
@@ -259,7 +263,7 @@ def _pinecone_store(config: RunnableConfig, namespace: str) -> PineconeVectorSto
     if not google_key:
         raise RuntimeError("GOOGLE_API_KEY is required for Gemini embeddings")
     embeddings = GoogleGenerativeAIEmbeddings(
-        model=os.getenv("CAREEROS_EMBEDDING_MODEL", "models/text-embedding-004"),
+        model=os.getenv("CAREEROS_EMBEDDING_MODEL", "models/gemini-embedding-001"),
         api_key=google_key,
     )
     return PineconeVectorStore(
@@ -360,6 +364,11 @@ def _normalize_job(
     description: str,
     url: str,
     source: str,
+    salary_min: Any = None,
+    salary_max: Any = None,
+    salary_currency: str | None = None,
+    salary_period: str | None = None,
+    workplace_type: str | None = None,
 ) -> dict[str, Any] | None:
     title = title.strip()
     company = company.strip()
@@ -367,7 +376,7 @@ def _normalize_job(
     url = url.strip()
     if not title or not company or not description or not url.startswith("https://"):
         return None
-    return {
+    job = {
         "title": title,
         "company": company,
         "location": location.strip() or "Not specified",
@@ -375,6 +384,14 @@ def _normalize_job(
         "url": url,
         "source": source,
     }
+    if salary_min is not None or salary_max is not None:
+        job["salary_min"] = salary_min
+        job["salary_max"] = salary_max
+        job["salary_currency"] = salary_currency or "USD"
+        job["salary_period"] = salary_period or "year"
+    if workplace_type:
+        job["workplace_type"] = workplace_type
+    return job
 
 
 def _fetch_adzuna(
@@ -417,6 +434,11 @@ def _fetch_adzuna(
                     str(item.get("description") or ""),
                     str(item.get("redirect_url") or ""),
                     "adzuna",
+                    item.get("salary_min"),
+                    item.get("salary_max"),
+                    item.get("salary_currency"),
+                    "estimated" if item.get("salary_is_predicted") else "year",
+                    workplace_type,
                 )
             )
         ]
@@ -483,6 +505,11 @@ def _fetch_jsearch(
                 str(item.get("job_description") or ""),
                 str(item.get("job_apply_link") or item.get("job_google_link") or ""),
                 "jsearch",
+                item.get("job_min_salary"),
+                item.get("job_max_salary"),
+                item.get("job_salary_currency"),
+                item.get("job_salary_period"),
+                item.get("job_workplace_type") or workplace_type,
             )
             if job:
                 jobs.append(job)
@@ -502,6 +529,53 @@ def _fetch_jsearch(
             "latency_seconds": round(time.perf_counter() - started, 3),
             "calls": 1,
         }
+
+
+def _fetch_company_research(
+    jobs: list[dict[str, Any]],
+    config: RunnableConfig,
+) -> list[dict[str, Any]]:
+    api_key = _credential(config, "TAVILY_API_KEY")
+    if not api_key:
+        _emit("status", agent="company_research", message="Tavily not configured; live company research is unavailable.")
+        return []
+
+    results: list[dict[str, Any]] = []
+    for job in jobs:
+        _emit("status", agent="company_research", message=f"Researching current public sources for {job['company']}.")
+        try:
+            response = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": api_key,
+                    "query": f"{job['company']} company news product engineering",
+                    "topic": "news",
+                    "search_depth": "basic",
+                    "max_results": 3,
+                    "include_answer": False,
+                },
+                timeout=REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+            items = response.json().get("results", [])
+            results.append({
+                "company": job["company"],
+                "status": "ok" if items else "empty",
+                "results": [
+                    {
+                        "title": item.get("title", ""),
+                        "url": item.get("url", ""),
+                        "content": item.get("content", "")[:900],
+                        "published_date": item.get("published_date"),
+                    }
+                    for item in items
+                    if item.get("url") and item.get("content")
+                ],
+            })
+        except (requests.RequestException, ValueError) as error:
+            logger.warning("Company research failed for %s: %s", job["company"], type(error).__name__)
+            results.append({"company": job["company"], "status": "unavailable", "results": []})
+    return results
 
 
 def job_scout(
@@ -552,6 +626,7 @@ def job_scout(
     latency = round(time.perf_counter() - started, 3)
     return {
         "job_listings": jobs[:20],
+        "company_research": _fetch_company_research(jobs[:5], config),
         "target_job_url": jobs[0]["url"],
         "api_metrics": {
             "adzuna": adzuna_metrics,
@@ -675,6 +750,10 @@ def outreach_agent(
         {
             "verified_profile": state["profile_data"],
             "job": {key: job[key] for key in ("title", "company", "description", "url")},
+            "company_research": [
+                item for item in state.get("company_research", [])
+                if item.get("company") == job.get("company")
+            ],
         },
         ensure_ascii=False,
     )
@@ -685,7 +764,8 @@ def outreach_agent(
             SystemMessage(
                 content=(
                     "Draft a concise, professional email to the hiring manager. "
-                    "Use only verified candidate facts and this live role. Do not "
+                    "Use only verified candidate facts and this live role. Mention company "
+                    "developments only when included in the supplied public research. Do not "
                     "claim an application was submitted. Include a subject line."
                 )
             ),
@@ -714,12 +794,21 @@ def interview_prep_agent(
                 content=(
                     "Return JSON matching this schema: " + schema + ". Generate 5 "
                     "role-specific behavioral interview questions designed for STAR "
-                    "answers. Do not invent candidate experience. Return only JSON."
+                    "answers plus 2 technical simulation challenges grounded in the job "
+                    "description. Use public company research if provided. Do not invent "
+                    "candidate experience. Return only JSON."
                 )
             ),
             HumanMessage(
                 content=json.dumps(
-                    {"job": job, "verified_profile": state["profile_data"]},
+                    {
+                        "job": job,
+                        "verified_profile": state["profile_data"],
+                        "company_research": [
+                            item for item in state.get("company_research", [])
+                            if item.get("company") == job.get("company")
+                        ],
+                    },
                     ensure_ascii=False,
                 )
             ),
@@ -729,6 +818,7 @@ def interview_prep_agent(
     result = _parse_json(text, InterviewQuestions)
     return {
         "interview_prep": result.questions,
+        "technical_challenges": result.technical_challenges,
         "agent_metrics": {"interview_prep_agent": metrics},
     }
 

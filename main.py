@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
 import re
+import requests
+import sqlite3
 import tempfile
+import time
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import closing
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -17,6 +25,7 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadF
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.tracers import LangChainTracer
+from pydantic import BaseModel, Field
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import letter
@@ -48,6 +57,9 @@ app.add_middleware(
 MAX_RESUME_BYTES = 12 * 1024 * 1024
 ARTIFACT_DIRECTORY = Path(
     os.getenv("CAREEROS_ARTIFACT_DIRECTORY", Path(tempfile.gettempdir()) / "careeros-artifacts")
+)
+EMAIL_LEDGER_PATH = Path(
+    os.getenv("CAREEROS_EMAIL_LEDGER", str(ARTIFACT_DIRECTORY / "email_dispatches.sqlite3"))
 )
 
 
@@ -93,11 +105,61 @@ def _credentials_from_request(request: Request) -> dict[str, str]:
         "ADZUNA_APP_ID": "x-adzuna-app-id",
         "ADZUNA_APP_KEY": "x-adzuna-app-key",
         "JSEARCH_API_KEY": "x-jsearch-api-key",
+        "TAVILY_API_KEY": "x-tavily-api-key",
+        "RESEND_API_KEY": "x-resend-api-key",
+        "TAVILY_API_KEY": "x-tavily-api-key",
+        "RESEND_API_KEY": "x-resend-api-key",
     }
     return {
         name: request.headers.get(header, "").strip() or os.getenv(name, "").strip()
         for name, header in names.items()
     }
+
+
+class OutreachSendRequest(BaseModel):
+    thread_id: str = Field(min_length=16, max_length=64)
+    recipient_email: str = Field(min_length=5, max_length=254)
+    consent: bool = False
+    daily_email_limit: int = Field(default=5, ge=0, le=50)
+
+
+def _reserve_daily_email(thread_id: str, recipient_email: str, daily_limit: int) -> str:
+    if daily_limit < 1:
+        raise HTTPException(status_code=429, detail="Daily email sending is disabled by the current limit.")
+    EMAIL_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    dispatch_id = uuid.uuid4().hex
+    day = datetime.now(timezone.utc).date().isoformat()
+    recipient_hash = hashlib.sha256(recipient_email.strip().casefold().encode("utf-8")).hexdigest()
+    with closing(sqlite3.connect(EMAIL_LEDGER_PATH, timeout=15, isolation_level=None)) as connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS outreach_dispatches ("
+            "dispatch_id TEXT PRIMARY KEY, day TEXT NOT NULL, run_id TEXT NOT NULL, "
+            "recipient_hash TEXT NOT NULL, status TEXT NOT NULL, provider_id TEXT, created_at TEXT NOT NULL)"
+        )
+        connection.execute("BEGIN IMMEDIATE")
+        sent_today = connection.execute(
+            "SELECT COUNT(*) FROM outreach_dispatches WHERE day = ? AND status IN ('reserved', 'sent')",
+            (day,),
+        ).fetchone()[0]
+        if sent_today >= daily_limit:
+            connection.execute("ROLLBACK")
+            raise HTTPException(status_code=429, detail="Daily outreach limit reached.")
+        connection.execute(
+            "INSERT INTO outreach_dispatches "
+            "(dispatch_id, day, run_id, recipient_hash, status, created_at) "
+            "VALUES (?, ?, ?, ?, 'reserved', ?)",
+            (dispatch_id, day, thread_id, recipient_hash, datetime.now(timezone.utc).isoformat()),
+        )
+        connection.execute("COMMIT")
+    return dispatch_id
+
+
+def _finish_email_dispatch(dispatch_id: str, status: str, provider_id: str | None = None) -> None:
+    with closing(sqlite3.connect(EMAIL_LEDGER_PATH, timeout=15, isolation_level=None)) as connection:
+        connection.execute(
+            "UPDATE outreach_dispatches SET status = ?, provider_id = ? WHERE dispatch_id = ?",
+            (status, provider_id, dispatch_id),
+        )
 
 
 def _create_tailored_cv_pdf(markdown: str, run_id: str) -> Path:
@@ -302,3 +364,151 @@ async def approve_z_axis(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/send-outreach")
+async def send_outreach(payload: OutreachSendRequest, request: Request) -> dict[str, Any]:
+    if payload.consent is not True:
+        raise HTTPException(status_code=403, detail="Explicit consent is required to send outreach.")
+    recipient = payload.recipient_email.strip()
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", recipient):
+        raise HTTPException(status_code=422, detail="Enter a valid recipient email address.")
+
+    credentials = _credentials_from_request(request)
+    api_key = credentials.get("RESEND_API_KEY", "")
+    sender = request.headers.get("x-resend-from-email", "").strip() or os.getenv("RESEND_FROM_EMAIL", "").strip()
+    if not api_key or not sender:
+        raise HTTPException(
+            status_code=503,
+            detail="Resend API key and a verified RESEND_FROM_EMAIL are required.",
+        )
+
+    config = _run_config(payload.thread_id, credentials, "", "")
+    snapshot = careeros_graph.get_state(config)
+    if not snapshot.values or not snapshot.values.get("outreach_draft"):
+        raise HTTPException(status_code=409, detail="This pipeline has no outreach draft to send.")
+
+    dispatch_id = _reserve_daily_email(
+        payload.thread_id,
+        recipient,
+        payload.daily_email_limit,
+    )
+    draft = str(snapshot.values["outreach_draft"]).strip()
+    subject_match = re.search(r"(?im)^subject:\s*(.+)$", draft)
+    subject = subject_match.group(1).strip() if subject_match else "Career opportunity"
+    body = re.sub(r"(?im)^subject:\s*.+\n?", "", draft, count=1).strip()
+    try:
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"from": sender, "to": [recipient], "subject": subject, "text": body},
+            timeout=(5, 20),
+        )
+        response.raise_for_status()
+        provider_id = str(response.json().get("id", ""))
+    except (requests.RequestException, ValueError) as error:
+        _finish_email_dispatch(dispatch_id, "failed")
+        status = getattr(getattr(error, "response", None), "status_code", None)
+        logger.warning("Resend dispatch failed with status %s", status or "network_error")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Resend did not accept the email (HTTP {status or 'network error'}).",
+        ) from error
+
+    _finish_email_dispatch(dispatch_id, "sent", provider_id)
+    return {
+        "status": "sent",
+        "provider_id": provider_id,
+        "message": "Outreach email sent after explicit human consent.",
+        "daily_limit": payload.daily_email_limit,
+    }
+
+
+@app.post("/webhooks/resend")
+async def resend_webhook(request: Request) -> dict[str, str]:
+    webhook_secret = os.getenv("RESEND_WEBHOOK_SECRET", "").strip()
+    if not webhook_secret:
+        raise HTTPException(status_code=503, detail="Resend webhook verification is not configured.")
+    webhook_id = request.headers.get("svix-id", "")
+    timestamp = request.headers.get("svix-timestamp", "")
+    signatures = request.headers.get("svix-signature", "")
+    body = await request.body()
+    try:
+        timestamp_number = int(timestamp)
+        secret_value = webhook_secret.removeprefix("whsec_")
+        signing_key = base64.b64decode(secret_value, validate=True)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature metadata.") from None
+    if abs(time.time() - timestamp_number) > 300:
+        raise HTTPException(status_code=400, detail="Webhook timestamp is outside the allowed window.")
+    signed_content = webhook_id.encode() + b"." + timestamp.encode() + b"." + body
+    expected = base64.b64encode(hmac.new(signing_key, signed_content, hashlib.sha256).digest()).decode()
+    if not any(
+        version == "v1" and hmac.compare_digest(signature, expected)
+        for candidate in signatures.split()
+        if (parts := candidate.split(",", maxsplit=1)) and len(parts) == 2
+        for version, signature in [parts]
+    ):
+        raise HTTPException(status_code=401, detail="Webhook signature verification failed.")
+    try:
+        event = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid webhook JSON.") from None
+
+    event_type = str(event.get("type", ""))
+    data = event.get("data") or {}
+    provider_id = str(data.get("email_id") or data.get("id") or "")
+    if event_type not in {
+        "email.sent",
+        "email.delivered",
+        "email.opened",
+        "email.clicked",
+        "email.bounced",
+        "email.complained",
+    } or not provider_id:
+        raise HTTPException(status_code=400, detail="Unsupported or incomplete Resend event.")
+
+    EMAIL_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(EMAIL_LEDGER_PATH, timeout=15, isolation_level=None)) as connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS outreach_events ("
+            "event_id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, "
+            "event_type TEXT NOT NULL, occurred_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO outreach_events (event_id, provider_id, event_type, occurred_at) "
+            "VALUES (?, ?, ?, ?)",
+            (webhook_id, provider_id, event_type, datetime.now(timezone.utc).isoformat()),
+        )
+    return {"status": "recorded"}
+
+
+@app.get("/outreach-analytics")
+async def outreach_analytics(
+    x_careeros_thread_id: str = Header(...),
+) -> dict[str, Any]:
+    thread_id = x_careeros_thread_id.strip()
+    if not EMAIL_LEDGER_PATH.is_file():
+        return {"sent": 0, "delivered": 0, "opened": 0, "clicked": 0, "bounced": 0}
+    with closing(sqlite3.connect(EMAIL_LEDGER_PATH, timeout=10)) as connection:
+        sent = connection.execute(
+            "SELECT COUNT(*) FROM outreach_dispatches WHERE run_id = ? AND status = 'sent'",
+            (thread_id,),
+        ).fetchone()[0]
+        try:
+            rows = connection.execute(
+                "SELECT e.event_type, COUNT(*) FROM outreach_events e "
+                "JOIN outreach_dispatches d ON d.provider_id = e.provider_id "
+                "WHERE d.run_id = ? GROUP BY e.event_type",
+                (thread_id,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+    events = {name: count for name, count in rows}
+    return {
+        "sent": sent,
+        "delivered": events.get("email.delivered", 0),
+        "opened": events.get("email.opened", 0),
+        "clicked": events.get("email.clicked", 0),
+        "bounced": events.get("email.bounced", 0),
+    }

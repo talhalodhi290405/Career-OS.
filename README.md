@@ -12,6 +12,8 @@
 
 > **CareerOS** is a governed career operations workspace. It verifies resume facts, sources live opportunities, generates tailored application materials, and prepares application forms in a visible browser. A human reviews and completes every final submission.
 
+**Product requirements:** See [PRD.md](PRD.md) for the full hackathon requirements, governance model, architecture, demo choreography, and submission checklist.
+
 </div>
 
 ---
@@ -139,6 +141,11 @@ Create a `.env` file in the project root (this file is gitignored — never comm
 # ADZUNA_APP_ID=...
 # ADZUNA_APP_KEY=...
 # JSEARCH_API_KEY=...
+# TAVILY_API_KEY=...
+# RESEND_API_KEY=...
+# RESEND_FROM_EMAIL=verified-sender@your-domain.example
+# RESEND_WEBHOOK_SECRET=whsec_...
+# CAREEROS_EMAIL_LEDGER=./data/email_dispatches.sqlite3
 # Backend URL for the Next.js server-side proxy
 # CAREEROS_BACKEND_URL=http://127.0.0.1:8000
 ```
@@ -169,6 +176,9 @@ npm run dev
 ```
 
 The UI opens at `http://localhost:3000`. The same-origin Next.js API route proxies to `CAREEROS_BACKEND_URL` (default `http://127.0.0.1:8000`).
+
+Create the Pinecone index with the dimension required by the configured Gemini embedding model (`gemini-embedding-001` defaults to 3072 dimensions). Set `PINECONE_INDEX_NAME` and `PINECONE_API_KEY` in the backend environment or enter them in System Credentials.
+For Resend delivery, configure a verified `RESEND_FROM_EMAIL`. Point Resend webhooks at `POST /webhooks/resend` and configure its signing secret as `RESEND_WEBHOOK_SECRET`; the endpoint verifies Svix signatures and records delivery/open/click events.
 
 ### 6. Using CareerOS
 

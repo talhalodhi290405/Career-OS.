@@ -48,16 +48,23 @@ type Job = {
   skills?: string[];
   matched_profile_skills?: string[];
   profile_match_pct?: number;
+  salary_min?: number;
+  salary_max?: number;
+  salary_currency?: string;
+  salary_period?: string;
+  workplace_type?: string;
 };
 type AgentMetric = { status?: string; total_tokens?: number; latency_seconds?: number };
 type CareerState = {
   profile_data: Record<string, unknown>;
   job_listings: Job[];
+  company_research: { company: string; status?: string; results: { title: string; url: string; content: string; published_date?: string }[] }[];
   tailored_cv: string;
   tailored_cv_path: string;
   cover_letter: string;
   outreach_draft: string;
   interview_prep: string[];
+  technical_challenges: string[];
   agent_metrics: Record<string, AgentMetric>;
   api_metrics: Record<string, Record<string, unknown>>;
   ats_score: number;
@@ -77,11 +84,13 @@ const pages: { id: PageKey; label: string; icon: LucideIcon; group: string }[] =
 const initialData: CareerState = {
   profile_data: {},
   job_listings: [],
+  company_research: [],
   tailored_cv: "",
   tailored_cv_path: "",
   cover_letter: "",
   outreach_draft: "",
   interview_prep: [],
+  technical_challenges: [],
   agent_metrics: {},
   api_metrics: {},
   ats_score: 0,
@@ -128,12 +137,33 @@ export default function Home() {
     adzunaId: "",
     adzunaKey: "",
     jsearch: "",
+    tavily: "",
+    resend: "",
+    resendFromEmail: "",
+    dailyEmailLimit: "5",
   });
+  const [outreachRecipient, setOutreachRecipient] = useState("");
+  const [outreachConsent, setOutreachConsent] = useState(false);
+  const [outreachResult, setOutreachResult] = useState("");
+  const [outreachAnalytics, setOutreachAnalytics] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const saved = window.localStorage.getItem("careeros-theme");
     if (saved === "light" || saved === "dark") setTheme(saved);
   }, []);
+
+  useEffect(() => {
+    if (page !== "outreach" || !threadId) return;
+    const controller = new AbortController();
+    fetch("/api/backend/outreach-analytics", {
+      headers: { "X-CareerOS-Thread-ID": threadId },
+      cache: "no-store",
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (response.ok) setOutreachAnalytics(await response.json() as Record<string, number>);
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [page, threadId, outreachResult]);
 
   const requestHeaders = () => ({
     ...(credentials.groq && { "X-Groq-Api-Key": credentials.groq }),
@@ -143,6 +173,10 @@ export default function Home() {
     ...(credentials.adzunaId && { "X-Adzuna-App-Id": credentials.adzunaId }),
     ...(credentials.adzunaKey && { "X-Adzuna-App-Key": credentials.adzunaKey }),
     ...(credentials.jsearch && { "X-JSearch-Api-Key": credentials.jsearch }),
+    ...(credentials.tavily && { "X-Tavily-Api-Key": credentials.tavily }),
+    ...(credentials.resend && { "X-Resend-Api-Key": credentials.resend }),
+    ...(credentials.resendFromEmail && { "X-Resend-From-Email": credentials.resendFromEmail }),
+    "X-CareerOS-Daily-Email-Limit": credentials.dailyEmailLimit,
   });
 
   const consumeSse = async (
@@ -278,6 +312,35 @@ export default function Home() {
     }
   };
 
+  const sendOutreach = async () => {
+    if (!threadId || !outreachConsent || !outreachRecipient) {
+      setError("Select a recipient and confirm consent before sending.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setOutreachResult("");
+    try {
+      const response = await fetch(`${API_URL}/send-outreach`, {
+        method: "POST",
+        headers: { ...requestHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          thread_id: threadId,
+          recipient_email: outreachRecipient,
+          consent: outreachConsent,
+          daily_email_limit: Number(credentials.dailyEmailLimit),
+        }),
+      });
+      const result = await response.json() as { status?: string; message?: string; detail?: string };
+      if (!response.ok) throw new Error(result.detail || `Email dispatch failed (${response.status}).`);
+      setOutreachResult(result.message || "Email sent.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Email dispatch failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
@@ -360,6 +423,10 @@ export default function Home() {
             <Credential label="Adzuna app ID" value={credentials.adzunaId} onChange={(value) => setCredentials({ ...credentials, adzunaId: value })} />
             <Credential label="Adzuna app key" value={credentials.adzunaKey} onChange={(value) => setCredentials({ ...credentials, adzunaKey: value })} />
             <Credential label="JSearch API key" value={credentials.jsearch} onChange={(value) => setCredentials({ ...credentials, jsearch: value })} />
+            <Credential label="Tavily API key" value={credentials.tavily} onChange={(value) => setCredentials({ ...credentials, tavily: value })} />
+            <Credential label="Resend API key" value={credentials.resend} onChange={(value) => setCredentials({ ...credentials, resend: value })} />
+            <label>Resend verified from email<input type="email" value={credentials.resendFromEmail} onChange={(event) => setCredentials({ ...credentials, resendFromEmail: event.target.value })} autoComplete="off" /></label>
+            <label>Daily email limit<input type="number" min="0" max="50" value={credentials.dailyEmailLimit} onChange={(event) => setCredentials({ ...credentials, dailyEmailLimit: event.target.value })} /></label>
           </div>
         </details>
         <div className="sidebar-foot"><span className="live-indicator" /> LOCAL CONTROL PLANE</div>
@@ -431,16 +498,18 @@ export default function Home() {
             {pageHeader("MARKET / OPPORTUNITIES", "Job intelligence", "Live Adzuna and JSearch roles filtered by your target role, location, and work mode.")}
             {metrics}
             {data.job_listings.length ? <JobTable jobs={data.job_listings} /> : <Empty title="No live listings yet" text="Start a pipeline to source and compare current roles." icon={Search} />}
+            {data.company_research.length > 0 && <section className="surface" style={{ marginTop: 15 }}><div className="surface-head"><h2 className="surface-title">Company research</h2><span className="surface-note">PUBLIC SOURCES · TAVILY</span></div>{data.company_research.map((company) => <div className="research-block" key={company.company}><h3>{company.company}</h3>{company.results.length ? company.results.map((result) => <article className="research-item" key={result.url}><a href={result.url} target="_blank" rel="noreferrer">{result.title}</a><p>{result.content}</p><small>{result.published_date || "Source date unavailable"}</small></article>) : <p className="surface-note">No research results returned.</p>}</div>)}</section>}
           </>}
 
           {page === "outreach" && <>
             {pageHeader("COMMUNICATION / OUTREACH", "Make the first move.", "A recruiter-ready email grounded in verified candidate facts and the selected live role.")}
-            {data.outreach_draft ? <DocumentPanel title="Hiring manager email" icon={Mail} content={data.outreach_draft} onDownload={() => downloadText("careeros-outreach.md", data.outreach_draft)} /> : <Empty title="No draft yet" text="Run the pipeline to generate contextual outreach." icon={Mail} />}
+            {data.outreach_draft ? <><DocumentPanel title="Hiring manager email" icon={Mail} content={data.outreach_draft} onDownload={() => downloadText("careeros-outreach.md", data.outreach_draft)} /><section className="surface" style={{ marginTop: 15 }}><div className="surface-head"><h2 className="surface-title">Send with human approval</h2><span className="surface-note">RESEND · DAILY CAP {credentials.dailyEmailLimit}</span></div><Field label="Hiring manager email"><input type="email" value={outreachRecipient} onChange={(event) => setOutreachRecipient(event.target.value)} placeholder="name@company.com" required /></Field><label className="consent-row"><input type="checkbox" checked={outreachConsent} onChange={(event) => setOutreachConsent(event.target.checked)} /> I reviewed this draft and explicitly approve sending it to this recipient.</label><button className="primary-button" disabled={!outreachConsent || !outreachRecipient || busy} onClick={sendOutreach}>{busy ? <LoaderCircle size={15} className="spin" /> : <Mail size={15} />} Send approved outreach</button>{outreachResult && <div className="success-banner">{outreachResult}</div>}{error && <div className="error-banner">{error}</div>}</section><div className="metric-grid" style={{ marginTop: 15 }}><Metric label="SENT" value={String(outreachAnalytics.sent || 0)} foot="This pipeline" icon={Mail} /><Metric label="OPENED" value={String(outreachAnalytics.opened || 0)} foot="Resend events" icon={Activity} /><Metric label="CLICKED" value={String(outreachAnalytics.clicked || 0)} foot="Resend events" icon={ArrowRight} /></div></> : <Empty title="No draft yet" text="Run the pipeline to generate contextual outreach." icon={Mail} />}
           </>}
 
           {page === "interview" && <>
             {pageHeader("PRACTICE / PREPARATION", "Walk in ready.", "Role-specific behavioral prompts designed around Situation, Task, Action, and Result.")}
             {data.interview_prep.length ? <div className="question-list">{data.interview_prep.map((question, index) => <div className="question-card" key={`${index}-${question}`}><span className="question-number">STAR / {String(index + 1).padStart(2, "0")}</span><span className="question-text">{question}</span></div>)}</div> : <Empty title="Interview prep is empty" text="The prep agent will create role-specific questions after the live role match." icon={MessageSquareText} />}
+            {data.technical_challenges.length > 0 && <section className="surface" style={{ marginTop: 15 }}><div className="surface-head"><h2 className="surface-title">Technical simulations</h2><span className="surface-note">JOB-DESCRIPTION GROUNDED</span></div><div className="question-list">{data.technical_challenges.map((challenge, index) => <div className="question-card" key={`${index}-${challenge}`}><span className="question-number">TECH / {String(index + 1).padStart(2, "0")}</span><span className="question-text">{challenge}</span></div>)}</div></section>}
           </>}
 
           {page === "control" && <>
@@ -482,5 +551,5 @@ function DownloadPdf({ path }: { path: string }) {
 }
 
 function JobTable({ jobs }: { jobs: Job[] }) {
-  return <div className="table-wrap"><table className="jobs-table"><thead><tr><th>ROLE</th><th>LOCATION</th><th>FIT</th><th>SOURCE</th><th>RESUME SKILLS</th><th>LINK</th></tr></thead><tbody>{jobs.map((job, index) => <tr key={`${job.url}-${index}`}><td><div className="job-title">{job.title}</div><div className="job-sub">{job.company}</div></td><td>{job.location || "Not specified"}</td><td><strong>{job.profile_match_pct ?? 0}%</strong></td><td><span className="mini-tag">{job.source || "Live"}</span></td><td><div className="tag-row">{(job.matched_profile_skills || []).slice(0, 5).map((skill) => <span className="mini-tag" key={skill}>{skill}</span>)}</div></td><td><a href={job.url} target="_blank" rel="noreferrer">View role <ArrowRight size={12} /></a></td></tr>)}</tbody></table></div>;
+  return <div className="table-wrap"><table className="jobs-table"><thead><tr><th>ROLE</th><th>LOCATION / MODE</th><th>COMP RANGE</th><th>FIT</th><th>SOURCE</th><th>CV SKILLS</th><th>LINK</th></tr></thead><tbody>{jobs.map((job, index) => <tr key={`${job.url}-${index}`}><td><div className="job-title">{job.title}</div><div className="job-sub">{job.company}</div></td><td>{job.location || "Not specified"}<div className="job-sub">{job.workplace_type || "Mode not specified"}</div></td><td>{job.salary_min || job.salary_max ? `${job.salary_currency || "USD"} ${job.salary_min?.toLocaleString() || "?"}–${job.salary_max?.toLocaleString() || "?"} / ${job.salary_period || "year"}` : "Not provided"}</td><td><strong>{job.profile_match_pct ?? 0}%</strong></td><td><span className="mini-tag">{job.source || "Live"}</span></td><td><div className="tag-row">{(job.matched_profile_skills || []).slice(0, 5).map((skill) => <span className="mini-tag" key={skill}>{skill}</span>)}</div></td><td><a href={job.url} target="_blank" rel="noreferrer">View role <ArrowRight size={12} /></a></td></tr>)}</tbody></table></div>;
 }
