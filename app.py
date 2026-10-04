@@ -9,7 +9,7 @@ import requests
 import streamlit as st
 
 
-API_BASE_URL = os.getenv("CAREEROS_API_URL", "http://localhost:8000").rstrip("/")
+API_BASE_URL = os.getenv("CAREEROS_API_URL", "").rstrip("/") or "http://localhost:8000"
 NAV_ITEMS = [
     "Dynamic Dashboard",
     "CV Versions Hub",

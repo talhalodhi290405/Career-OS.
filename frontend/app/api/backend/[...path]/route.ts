@@ -11,7 +11,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return Response.json({ detail: "Unknown CareerOS backend route." }, { status: 404 });
   }
 
-  const backend = (process.env.CAREEROS_BACKEND_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+  const backend = (process.env.CAREEROS_BACKEND_URL || "").replace(/\/$/, "") || "http://127.0.0.1:8000";
   const upstreamUrl = `${backend}/${path.map(encodeURIComponent).join("/")}`;
   const headers = new Headers(request.headers);
   headers.delete("host");
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   if (path.join("/") !== "outreach-analytics") {
     return Response.json({ detail: "Unknown CareerOS backend route." }, { status: 404 });
   }
-  const backend = (process.env.CAREEROS_BACKEND_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+  const backend = (process.env.CAREEROS_BACKEND_URL || "").replace(/\/$/, "") || "http://127.0.0.1:8000";
   const upstream = await fetch(`${backend}/outreach-analytics`, {
     method: "GET",
     headers: { "X-CareerOS-Thread-ID": request.headers.get("X-CareerOS-Thread-ID") || "" },
