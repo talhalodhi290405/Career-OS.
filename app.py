@@ -234,6 +234,7 @@ def _clear_run() -> None:
 def _run_pipeline_direct(role: str, pdf_bytes: bytes, event_slot: Any, token_slot: Any) -> None:
     _clear_run()
 
+    run_id = f"run-{uuid4().hex[:12]}"
     config = {
         "configurable": {
             "credentials": {
@@ -245,7 +246,7 @@ def _run_pipeline_direct(role: str, pdf_bytes: bytes, event_slot: Any, token_slo
                 "ADZUNA_APP_KEY": st.session_state["adzuna_app_key"],
                 "JSEARCH_API_KEY": st.session_state["jsearch_api_key"],
             },
-            "thread_id": "streamlit-cloud-run"
+            "thread_id": run_id
         }
     }
 
@@ -254,7 +255,7 @@ def _run_pipeline_direct(role: str, pdf_bytes: bytes, event_slot: Any, token_slo
         "target_role": role.strip(),
         "resume_pdf_bytes": pdf_bytes,
         "resume_filename": "resume.pdf",
-        "run_id": f"run-{uuid4().hex[:12]}",
+        "run_id": run_id,
         "ats_strictness": st.session_state["ats_strictness"],
     })
 
