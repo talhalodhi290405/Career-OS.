@@ -635,6 +635,9 @@ def _retrieve_profile_facts(
     config: RunnableConfig,
     job: dict[str, Any],
 ) -> str:
+    profile = state.get("profile_data") or {}
+    if profile:
+        return json.dumps(profile, ensure_ascii=False)
     namespace = f"careeros-{state['run_id']}"
     vector_store = _pinecone_store(config, namespace)
     query = (
@@ -643,7 +646,7 @@ def _retrieve_profile_facts(
     )
     documents = vector_store.similarity_search(query, k=4)
     if not documents:
-        raise RuntimeError("Pinecone returned no verified candidate profile facts")
+        raise RuntimeError("No verified candidate profile facts are available")
     return "\n".join(document.page_content for document in documents)
 
 def _groq_model(config: RunnableConfig) -> ChatGroq:
