@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import streamlit as st
 from agent import careeros_graph, create_initial_state
@@ -252,6 +253,8 @@ def _run_pipeline_direct(role: str, pdf_bytes: bytes, event_slot: Any, token_slo
     state.update({
         "target_role": role.strip(),
         "resume_pdf_bytes": pdf_bytes,
+        "resume_filename": "resume.pdf",
+        "run_id": f"run-{uuid4().hex[:12]}",
         "ats_strictness": st.session_state["ats_strictness"],
     })
 
