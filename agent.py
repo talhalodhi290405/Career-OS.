@@ -518,6 +518,42 @@ def _fetch_jsearch(
             "calls": 1,
         }
 
+def _fetch_arbeitnow(role: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    started = time.perf_counter()
+    try:
+        response = requests.get(
+            "https://www.arbeitnow.com/api/job-board-api",
+            params={"search": role},
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        jobs = []
+        for item in response.json().get("data", [])[:20]:
+            job = _normalize_job(
+                str(item.get("title") or ""),
+                str(item.get("company_name") or ""),
+                str(item.get("location") or ""),
+                str(item.get("description") or ""),
+                str(item.get("url") or ""),
+                "arbeitnow",
+                workplace_type="remote" if item.get("remote") else None,
+            )
+            if job:
+                jobs.append(job)
+        return jobs, {
+            "status": "ok" if jobs else "empty",
+            "remaining": None,
+            "calls": 1,
+            "latency_seconds": round(time.perf_counter() - started, 3),
+        }
+    except (requests.RequestException, ValueError, KeyError):
+        return [], {
+            "status": "request_failed",
+            "remaining": None,
+            "calls": 1,
+            "latency_seconds": round(time.perf_counter() - started, 3),
+        }
+
 def _fetch_company_research(
     jobs: list[dict[str, Any]],
     config: RunnableConfig,
@@ -575,8 +611,6 @@ def job_scout(
         _credential(config, "ADZUNA_APP_ID") and _credential(config, "ADZUNA_APP_KEY")
     )
     has_jsearch = bool(_credential(config, "JSEARCH_API_KEY"))
-    if not has_adzuna and not has_jsearch:
-        raise RuntimeError("Configure Adzuna credentials or JSEARCH_API_KEY to source live jobs")
 
     started = time.perf_counter()
     adzuna_jobs, adzuna_metrics = _fetch_adzuna(role, location, workplace_type, config)
@@ -591,9 +625,12 @@ def job_scout(
             seen.add(identity)
             jobs.append(job)
     if not jobs:
+        fallback_jobs, fallback_metrics = _fetch_arbeitnow(role)
+        jobs.extend(fallback_jobs)
+        adzuna_metrics["fallback"] = fallback_metrics
+    if not jobs:
         raise RuntimeError(
-            "No live jobs were returned. "
-            f"Adzuna: {adzuna_metrics['status']}; JSearch: {jsearch_metrics['status']}"
+            "No jobs were returned from configured sources or the public fallback."
         )
     verified_skills = [
         skill.strip()
@@ -608,7 +645,11 @@ def job_scout(
     if verified_skills:
         jobs.sort(key=lambda job: job["profile_match_pct"], reverse=True)
     sources = sorted({job["source"] for job in jobs})
-    calls = adzuna_metrics.get("calls", 0) + jsearch_metrics.get("calls", 0)
+    calls = (
+        adzuna_metrics.get("calls", 0)
+        + jsearch_metrics.get("calls", 0)
+        + adzuna_metrics.get("fallback", {}).get("calls", 0)
+    )
     latency = round(time.perf_counter() - started, 3)
     return {
         "job_listings": jobs[:20],
