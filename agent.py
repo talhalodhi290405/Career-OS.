@@ -320,13 +320,16 @@ def profile_analyzer(
     profile = _verified_profile(facts, resume_text)
 
     namespace = f"careeros-{state['run_id']}"
-    vector_store = _pinecone_store(config, namespace)
-    fact_text = json.dumps(profile, ensure_ascii=False)
-    vector_store.add_documents(
-        [Document(page_content=fact_text, metadata={"run_id": state["run_id"], "kind": "verified_profile"})],
-        ids=[f"{state['run_id']}-verified-profile"],
-    )
-    _emit("status", agent="profile_analyzer", message="Verified candidate facts indexed in Pinecone.")
+    try:
+        vector_store = _pinecone_store(config, namespace)
+        fact_text = json.dumps(profile, ensure_ascii=False)
+        vector_store.add_documents(
+            [Document(page_content=fact_text, metadata={"run_id": state["run_id"], "kind": "verified_profile"})],
+            ids=[f"{state['run_id']}-verified-profile"],
+        )
+        _emit("status", agent="profile_analyzer", message="Verified candidate facts indexed in Pinecone.")
+    except Exception:
+        _emit("status", agent="profile_analyzer", message="Pinecone unavailable; continuing with verified in-memory profile.")
     return {
         "profile_data": profile,
         "agent_metrics": {"profile_analyzer": metrics},
