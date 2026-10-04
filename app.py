@@ -49,7 +49,6 @@ for key, value in {
     "api_metrics": {},
     "ats_score": 0,
     "pipeline_ready": False,
-    "pipeline_events": [],
     "pipeline_error": "",
     "live_agent_text": {},
     "thread_id": "",
@@ -233,7 +232,6 @@ def _clear_run() -> None:
 def _run_pipeline_direct(role: str, pdf_bytes: bytes, event_slot: Any, token_slot: Any) -> None:
     _clear_run()
 
-    # Prepare credentials for the graph configuration
     config = {
         "configurable": {
             "credentials": {
@@ -257,10 +255,7 @@ def _run_pipeline_direct(role: str, pdf_bytes: bytes, event_slot: Any, token_slo
     })
 
     try:
-        # We invoke the graph directly in memory.
-        # Note: since the graph handles streaming via a global writer in agent.py,
-        # we might not see tokens in real-time unless we customize the stream.
-        # For now, we run the full invocation.
+        # execute graph directly in memory
         final_state = careeros_graph.invoke(state, config=config)
 
         # Update session state with results
@@ -275,7 +270,6 @@ def _run_pipeline_direct(role: str, pdf_bytes: bytes, event_slot: Any, token_slo
         st.session_state["pipeline_error"] = f"In-memory pipeline failed: {str(error)}"
 
 def _authorize_direct() -> None:
-    # Since we are now simulating RPA for cloud, we just set the flag.
     st.session_state["z_axis_approved"] = True
     st.session_state["rpa_result"] = {"message": "Simulated Success for Cloud Demo"}
 
@@ -353,7 +347,7 @@ if navigation == "Dynamic Dashboard":
     event_output = st.container(border=True)
     token_output = st.container(border=True)
     if start and uploaded_pdf is not None:
-        with st.spinner("Running pipeline in-memory..."):
+        with st.spinner("Executing Agentic Pipeline in-memory..."):
             _run_pipeline_direct(role, uploaded_pdf.getvalue(), event_output, token_output)
         if st.session_state["pipeline_error"]:
             st.error(st.session_state["pipeline_error"])
@@ -392,7 +386,7 @@ elif navigation == "Job Intelligence":
         st.info("No live listings yet. Run the pipeline from Dynamic Dashboard.")
 
 elif navigation == "Outreach":
-    _page_header("Workspace / Communication", "Outreach", "A contextual hiring-manager draft grounded in the profile and selected job.")
+    _page_header("Workspace / Communication", "Outreach", "A contextual hiring-manager outline grounded in the profile and selected job.")
     if st.session_state["outreach_draft"]:
         st.markdown(st.session_state["outreach_draft"])
     else:
