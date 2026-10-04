@@ -839,8 +839,52 @@ def z_axis_approval_gate(
     return {"z_axis_approved": approval is True}
 
 
-def _approval_route(state: AgentState) -> str:
-    return "approved" if state.get("z_axis_approved") is True else "approval_required"
+def verification_agent(
+    state: AgentState,
+    config: RunnableConfig,
+) -> dict[str, Any]:
+    job = state["job_listings"][0]
+    _emit("status", agent="verification_agent", message="Performing final Y-Axis truth check for fabrication.")
+    model = _groq_model(config)
+
+    verification_prompt = (
+        "You are the Y-Axis Truth Guardian. Your sole purpose is to prevent AI hallucinations.\n\n"
+        "COMPARE the following tailored materials against the verified candidate profile.\n\n"
+        f"VERIFIED PROFILE:\n{json.dumps(state['profile_data'], ensure_ascii=False)}\n\n"
+        f"TAILORED CV:\n{state['tailored_cv']}\n\n"
+        f"COVER LETTER:\n{state['cover_letter']}\n\n"
+        f"OUTREACH DRAFT:\n{state['outreach_draft']}\n\n"
+        "RULES:\n"
+        "1. If any employer, date, degree, metric, or skill appears in the tailored materials "
+        "but is NOT present in the VERIFIED PROFILE, mark as FABRICATED.\n"
+        "2. Inferences (e.g., 'experienced in Python' based on a 'Django' project) are allowed "
+        "if reasonable, but inventing specific job titles or companies is a critical failure.\n"
+        "3. Return JSON: {'verified': bool, 'issues': list[str], 'confidence': float}\n"
+        "Return ONLY JSON."
+    )
+
+    text, metrics = _stream_model(
+        model,
+        "verification_agent",
+        [SystemMessage(content="You are a strict truth-verification agent. Zero tolerance for fabrication."), HumanMessage(content=verification_prompt)],
+        config,
+    )
+
+    try:
+        result = _parse_json(text, BaseModel) # Using generic BaseModel since we only need a dict
+        # Simple validation of the result
+        is_verified = result.get("verified", False)
+        if not is_verified:
+            _emit("status", agent="verification_agent", message=f"Fabrication detected: {result.get('issues', 'Unknown issues')}")
+            raise RuntimeError(f"Y-Axis Verification Failed: {result.get('issues', 'Fabrication detected in tailored materials.')}")
+
+        _emit("status", agent="verification_agent", message="Materials verified as truthful.")
+        return {"agent_metrics": {"verification_agent": metrics}}
+    except Exception as e:
+        if "Y-Axis Verification Failed" in str(e):
+            raise
+        logger.exception("Verification agent parsing failed")
+        raise RuntimeError("Verification agent crashed while checking for hallucinations")
 
 
 _builder = StateGraph(AgentState)
