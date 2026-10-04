@@ -73,6 +73,12 @@ class InterviewQuestions(BaseModel):
     questions: list[str] = Field(min_length=4, max_length=8)
     technical_challenges: list[str] = Field(min_length=1, max_length=5)
 
+class VerificationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    verified: bool
+    issues: list[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0, le=1)
+
 def create_initial_state() -> AgentState:
     return {
         "profile_data": {},
@@ -184,7 +190,22 @@ def _verified_profile(facts: CandidateFacts, resume_text: str) -> dict[str, Any]
     if not evidence:
         raise ValueError("Resume facts contained no verifiable evidence quotes")
     name = facts.name.strip()
-    if not name or re.sub(r"\s+", " ", name).casefold() not in normalized_resume:
+    normalized_name = re.sub(r"[^\w]+", " ", name, flags=re.UNICODE).strip().casefold()
+    resume_name_tokens = set(re.findall(r"\b[\w'-]+\b", normalized_resume, flags=re.UNICODE))
+    name_tokens = [token for token in normalized_name.split() if token]
+    # Accept normal PDF line/column extraction variations and common full-name/short-name
+    # forms while still requiring every supplied name token to be present in the resume.
+    name_verified = bool(
+        normalized_name
+        and (
+            normalized_name in normalized_resume
+            or (
+                len(name_tokens) >= 2
+                and all(token in resume_name_tokens for token in name_tokens)
+            )
+        )
+    )
+    if not name_verified:
         raise ValueError("Candidate name could not be verified against the resume")
     email_match = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", resume_text, re.I)
     phone_match = re.search(r"(?:\+?\d[\d(). \t-]{7,}\d)", resume_text)
@@ -229,7 +250,8 @@ def _pinecone_store(config: RunnableConfig, namespace: str) -> PineconeVectorSto
     pinecone_key = _credential(config, "PINECONE_API_KEY")
     google_key = _credential(config, "GOOGLE_API_KEY")
     index_name = (
-        _config_values(config).get("pinecone_index_name")
+        _credential(config, "PINECONE_INDEX_NAME")
+        or _config_values(config).get("pinecone_index_name")
         or os.getenv("PINECONE_INDEX_NAME")
     )
     if not pinecone_key or not index_name:
@@ -814,11 +836,11 @@ def verification_agent(
         config,
     )
     try:
-        result = _parse_json(text, BaseModel) # Using generic BaseModel since we only need a dict
-        is_verified = result.get("verified", False)
-        if not is_verified:
-            _emit("status", agent="verification_agent", message=f"Fabrication detected: {result.get('issues', 'Unknown issues')}")
-            raise RuntimeError(f"Y-Axis Verification Failed: {result.get('issues', 'Fabrication detected in tailored materials.')}")
+        result = _parse_json(text, VerificationResult)
+        if not result.verified:
+            issues = result.issues or ["Fabrication detected in tailored materials."]
+            _emit("status", agent="verification_agent", message=f"Fabrication detected: {issues}")
+            raise RuntimeError(f"Y-Axis Verification Failed: {issues}")
         _emit("status", agent="verification_agent", message="Materials verified as truthful.")
         return {"agent_metrics": {"verification_agent": metrics}}
     except Exception as e:
