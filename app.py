@@ -129,6 +129,92 @@ st.markdown(
     [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
         gap: 0.55rem;
     }}
+    [data-testid="stSidebar"] > div:first-child {{
+        background:
+            radial-gradient(ellipse at 12% 0%, color-mix(in srgb, var(--cos-accent) 11%, transparent), transparent 48%),
+            var(--cos-sidebar);
+    }}
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2 {{
+        letter-spacing: .12em;
+        font-size: 1.02rem;
+        margin-bottom: .15rem;
+    }}
+    [data-testid="stSidebar"] [data-testid="stRadio"] > label {{
+        color: var(--cos-muted);
+        font-size: .72rem;
+        font-weight: 750;
+        letter-spacing: .13em;
+        text-transform: uppercase;
+        margin-bottom: .45rem;
+    }}
+    [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] {{
+        gap: .32rem;
+    }}
+    [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] > label {{
+        position: relative;
+        padding: .58rem .65rem;
+        margin: 0;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: transparent;
+        transition: background .18s ease, border-color .18s ease, transform .18s ease;
+    }}
+    [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] > label:hover {{
+        background: var(--cos-panel-soft);
+        border-color: var(--cos-border);
+        transform: translateX(2px);
+    }}
+    [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] > label:has(input:checked) {{
+        background: linear-gradient(100deg, color-mix(in srgb, var(--cos-accent) 14%, transparent), color-mix(in srgb, var(--cos-accent-alt) 9%, transparent));
+        border-color: color-mix(in srgb, var(--cos-accent) 36%, var(--cos-border));
+        box-shadow: inset 3px 0 0 var(--cos-accent), 0 5px 18px rgba(0,0,0,.08);
+    }}
+    [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] > label p {{
+        font-size: .86rem;
+        font-weight: 560;
+    }}
+    [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] > label:has(input:checked) p {{
+        color: var(--cos-text) !important;
+        font-weight: 750;
+    }}
+    .cos-side-brand {{
+        padding: .9rem .85rem;
+        margin: .15rem 0 .35rem;
+        border: 1px solid var(--cos-border);
+        border-radius: 14px;
+        background: linear-gradient(145deg, var(--cos-panel), color-mix(in srgb, var(--cos-accent) 5%, var(--cos-sidebar)));
+        box-shadow: 0 10px 28px rgba(0,0,0,.10);
+    }}
+    .cos-brand-row {{ display:flex; align-items:center; gap:.65rem; }}
+    .cos-brand-mark {{
+        display:flex; align-items:center; justify-content:center;
+        width:2.45rem; height:2.45rem; flex-shrink:0;
+        border-radius:11px; color:var(--cos-button-text);
+        background:linear-gradient(135deg,var(--cos-accent),var(--cos-accent-alt));
+        font-size:1.25rem; font-weight:900;
+        box-shadow:0 0 22px color-mix(in srgb,var(--cos-accent) 25%,transparent);
+    }}
+    .cos-brand-name {{ color:var(--cos-text); font-weight:850; letter-spacing:.12em; font-size:.93rem; }}
+    .cos-brand-sub {{ color:var(--cos-muted); font-size:.62rem; letter-spacing:.1em; margin-top:.18rem; }}
+    .cos-side-status {{
+        display:flex; align-items:center; gap:.45rem;
+        margin-top:.8rem; padding-top:.7rem; border-top:1px solid var(--cos-border);
+        color:var(--cos-muted); font-size:.72rem;
+    }}
+    .cos-live-dot {{ width:.45rem; height:.45rem; border-radius:50%; background:#22c55e; box-shadow:0 0 10px #22c55e88; }}
+    .cos-side-label {{
+        color:var(--cos-muted); font-size:.67rem; font-weight:800;
+        letter-spacing:.13em; margin:.55rem 0 .15rem;
+    }}
+    [data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {{
+        width:100%;
+        min-height:2.6rem;
+    }}
+    [data-testid="stSidebar"] [data-testid="stExpander"] {{
+        border:1px solid var(--cos-border);
+        border-radius:10px;
+        background:var(--cos-panel-soft);
+    }}
     [data-testid="stAppViewBlockContainer"] {{ max-width: 1480px; padding-top: 1.3rem; }}
     [data-testid="stVerticalBlockBorderWrapper"] {{
         background: var(--cos-panel-soft);
@@ -279,11 +365,44 @@ def _authorize_direct() -> None:
     st.session_state["rpa_result"] = {"message": "Simulated Success for Cloud Demo"}
 
 with st.sidebar:
-    st.markdown("## CAREEROS")
-    st.caption("AUTONOMOUS CAREER SYSTEM")
-    navigation = st.radio("Navigation", NAV_ITEMS, key="navigation")
+    pipeline_status = (
+        "READY FOR REVIEW" if st.session_state["pipeline_ready"]
+        else "ATTENTION REQUIRED" if st.session_state["pipeline_error"]
+        else "SYSTEM ONLINE"
+    )
+    st.markdown(
+        f"""
+        <div class="cos-side-brand">
+          <div class="cos-brand-row">
+            <div class="cos-brand-mark">C</div>
+            <div>
+              <div class="cos-brand-name">CAREEROS</div>
+              <div class="cos-brand-sub">AUTONOMOUS CAREER SYSTEM</div>
+            </div>
+          </div>
+          <div class="cos-side-status"><span class="cos-live-dot"></span><span>{pipeline_status}</span></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="cos-side-label">WORKSPACE MODULES</div>', unsafe_allow_html=True)
+    nav_icons = {
+        "Dynamic Dashboard": "◈",
+        "CV Versions Hub": "▤",
+        "Job Intelligence": "⌕",
+        "Outreach": "↗",
+        "Interview Prep": "◎",
+        "Control Tower": "⛨",
+    }
+    navigation = st.radio(
+        "Navigation",
+        NAV_ITEMS,
+        format_func=lambda item: f"{nav_icons.get(item, '•')}   {item}",
+        key="navigation",
+        label_visibility="collapsed",
+    )
     st.divider()
-    st.markdown("**Z-AXIS GOVERNANCE**")
+    st.markdown('<div class="cos-side-label">Z-AXIS · GOVERNANCE</div>', unsafe_allow_html=True)
     if st.session_state["z_axis_approved"]:
         st.success("Approval recorded")
     elif st.session_state["pipeline_ready"]:
