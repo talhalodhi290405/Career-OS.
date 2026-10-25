@@ -303,6 +303,73 @@ st.markdown(
         border: 1px solid var(--cos-border) !important;
         border-radius: 8px !important;
     }}
+    [data-testid="stAppViewContainer"] [data-testid="stMarkdownContainer"],
+    [data-testid="stAppViewContainer"] p,
+    [data-testid="stAppViewContainer"] li,
+    [data-testid="stAppViewContainer"] label,
+    [data-testid="stAppViewContainer"] span,
+    [data-testid="stAppViewContainer"] small,
+    [data-testid="stMetricValue"], [data-testid="stMetricValue"] div {{
+        color: var(--cos-text);
+    }}
+    [data-testid="stCaptionContainer"], .stCaption,
+    [data-testid="stWidgetLabel"] p, [data-testid="stMetricLabel"] p {{
+        color: var(--cos-muted) !important;
+    }}
+    [data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea,
+    [data-testid="stNumberInput"] input, [data-testid="stDateInput"] input,
+    [data-testid="stTimeInput"] input, [data-baseweb="select"] input,
+    [data-baseweb="select"] [role="combobox"] {{
+        color: var(--cos-text) !important;
+        -webkit-text-fill-color: var(--cos-text) !important;
+        background: var(--cos-input) !important;
+        border-color: var(--cos-border) !important;
+        caret-color: var(--cos-accent) !important;
+    }}
+    [data-testid="stExpander"], [data-testid="stExpander"] details,
+    [data-testid="stExpander"] summary, [data-testid="stChatMessage"],
+    [data-testid="stAlert"], [data-testid="stNotification"] {{
+        color: var(--cos-text) !important;
+        border-color: var(--cos-border) !important;
+        background-color: var(--cos-panel) !important;
+    }}
+    [data-testid="stTabs"] button, [data-testid="stRadio"] label,
+    [data-testid="stCheckbox"] label, [data-testid="stToggle"] label,
+    [data-testid="stSlider"] label {{ color: var(--cos-text) !important; }}
+    [data-testid="stTabs"] button[aria-selected="true"] {{
+        color: var(--cos-accent) !important;
+        border-bottom-color: var(--cos-accent) !important;
+    }}
+    [data-baseweb="popover"], [data-baseweb="menu"],
+    [data-baseweb="select"] [role="listbox"],
+    [data-baseweb="select"] [role="option"] {{
+        color: var(--cos-text) !important;
+        background-color: var(--cos-panel) !important;
+        border-color: var(--cos-border) !important;
+    }}
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+    [data-testid="stSidebar"] p, [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] span {{ color: var(--cos-text); }}
+    [data-testid="stSidebar"] .cos-side-label,
+    [data-testid="stSidebar"] .cos-brand-sub,
+    [data-testid="stSidebar"] .cos-side-status {{ color: var(--cos-muted) !important; }}
+    [data-testid="stBaseButton-secondary"],
+    [data-testid="stBaseButton-secondary"] p {{
+        color: var(--cos-text) !important;
+        background-color: var(--cos-panel) !important;
+        border-color: var(--cos-border) !important;
+    }}
+    [data-testid="stFileUploader"] section,
+    [data-testid="stFileUploader"] section div,
+    [data-testid="stFileUploader"] small {{
+        color: var(--cos-text) !important;
+        border-color: var(--cos-border) !important;
+    }}
+    [data-testid="stDataFrame"], [data-testid="stTable"] {{
+        background: var(--cos-panel) !important;
+        color: var(--cos-text) !important;
+        border-color: var(--cos-border) !important;
+    }}
     #MainMenu, footer {{ visibility: hidden; height: 0; }}
     </style>
     """,
