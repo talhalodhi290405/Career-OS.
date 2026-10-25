@@ -6,7 +6,7 @@ langchain-groq
 langchain-pinecone
 google-generativeai
 groq
-pinecone-client
+pinecone
 pydantic
 pdfplumber
 python-dotenv
