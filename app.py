@@ -65,17 +65,18 @@ for key, value in {
     "jsearch_api_key": "",
     "ats_strictness": 60,
     "ui_theme": "dark",
+    "assistant_messages": [],
 }.items():
     st.session_state.setdefault(key, value)
 
 theme_tokens = {
     "dark": {
-        "bg": "#0B0F19",
-        "panel": "rgba(26, 31, 43, 0.94)",
-        "panel_soft": "rgba(26, 31, 43, 0.72)",
-        "sidebar": "#101725",
-        "accent": "#00E5FF",
-        "accent_alt": "#B300FF",
+        "bg": "#050811",
+        "panel": "rgba(12, 19, 32, 0.97)",
+        "panel_soft": "rgba(9, 16, 29, 0.88)",
+        "sidebar": "#070D19",
+        "accent": "#00D9FF",
+        "accent_alt": "#1677FF",
         "text": "#F3F6FC",
         "muted": "#99A6BA",
         "border": "rgba(149, 170, 199, 0.20)",
@@ -216,6 +217,38 @@ st.markdown(
         background:var(--cos-panel-soft);
     }}
     [data-testid="stAppViewBlockContainer"] {{ max-width: 1480px; padding-top: 1.3rem; }}
+    [data-testid="stAppViewContainer"] {{
+        background-image: radial-gradient(ellipse at 78% 0%, color-mix(in srgb, var(--cos-accent) 7%, transparent), transparent 34%);
+    }}
+    [data-testid="stMetric"] {{
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--cos-accent) 5%, transparent), 0 10px 28px rgba(0,0,0,.10);
+        transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+    }}
+    [data-testid="stMetric"]:hover {{
+        transform: translateY(-2px);
+        border-color: color-mix(in srgb, var(--cos-accent) 55%, var(--cos-border));
+        box-shadow: 0 0 22px color-mix(in srgb, var(--cos-accent) 10%, transparent);
+    }}
+    [data-testid="stVerticalBlockBorderWrapper"] {{
+        box-shadow: 0 8px 28px rgba(0,0,0,.07);
+        transition: border-color .18s ease, box-shadow .18s ease;
+    }}
+    [data-testid="stBaseButton-primary"]:hover {{
+        filter: brightness(1.08);
+        box-shadow: 0 0 25px color-mix(in srgb, var(--cos-accent) 30%, transparent);
+        transform: translateY(-1px);
+    }}
+    .cos-hero {{
+        padding: 1.1rem 1.25rem; border-radius: 16px; margin: .35rem 0 1rem;
+        border: 1px solid var(--cos-border);
+        background: linear-gradient(115deg, color-mix(in srgb, var(--cos-accent) 10%, var(--cos-panel)), var(--cos-panel) 62%, color-mix(in srgb, var(--cos-accent-alt) 8%, var(--cos-panel)));
+        box-shadow: 0 12px 38px rgba(0,0,0,.08);
+    }}
+    .cos-hero-kicker {{ color:var(--cos-accent); font-size:.68rem; font-weight:850; letter-spacing:.16em; text-transform:uppercase; }}
+    .cos-hero-title {{ color:var(--cos-text); font-size:1.55rem; font-weight:850; letter-spacing:-.035em; margin:.28rem 0; }}
+    .cos-hero-copy {{ color:var(--cos-muted); font-size:.88rem; }}
+    .cos-assistant {{ border:1px solid var(--cos-border); border-radius:16px; padding:1rem; background:linear-gradient(140deg,var(--cos-panel),var(--cos-panel-soft)); box-shadow:0 10px 28px rgba(0,0,0,.08); }}
+    .cos-assistant-label {{ color:var(--cos-accent); font-size:.68rem; font-weight:850; letter-spacing:.14em; }}
     [data-testid="stVerticalBlockBorderWrapper"] {{
         background: var(--cos-panel-soft);
         border: 1px solid var(--cos-border) !important;
@@ -360,6 +393,58 @@ def _run_pipeline_direct(role: str, pdf_bytes: bytes, event_slot: Any, token_slo
     except Exception as error:
         st.session_state["pipeline_error"] = f"In-memory pipeline failed: {str(error)}"
 
+def _career_faq_reply(prompt: str) -> str:
+    q = prompt.casefold()
+    if any(word in q for word in ("how start", "get started", "how do i", "run pipeline", "upload")):
+        return "To start: choose a target role, upload a text-readable PDF resume, then select **Run career pipeline**. CareerOS verifies resume facts, searches for matching roles, and stages tailored application materials for your review."
+    if any(word in q for word in ("ats", "score", "alignment", "strictness")):
+        return "ATS skill alignment compares the verified skills extracted from your resume with the target-role requirements. Use the ATS strictness slider to tune screening sensitivity. A score is only shown after a successful pipeline run."
+    if any(word in q for word in ("company", "companies", "jazz", "foodpanda", "bank", "banking", "employer")):
+        return "CareerOS is a career workspace, not an employer portal. You can use Job Intelligence to review roles returned by connected job sources. Jazz, Foodpanda, and banks are examples of employers you may research; this demo does not claim a live partnership or show their private internal dashboards."
+    if any(word in q for word in ("privacy", "data", "resume", "secure", "security")):
+        return "Your uploaded resume is processed by the configured AI services for this run. Review the connected providers and credentials before uploading sensitive information. Avoid sharing API keys in chat or in public screenshots."
+    if any(word in q for word in ("human", "approval", "governance", "rpa", "control tower")):
+        return "CareerOS keeps a human review gate before the simulated browser/RPA step. Review generated materials first; the demo's authorization action is simulated and does not submit real job applications."
+    if any(word in q for word in ("job", "jobs", "search", "listing", "role")):
+        count = len(st.session_state.get("job_listings", []))
+        return f"CareerOS currently has **{count} job listing(s)** in this session. Run the pipeline with a target role to refresh results, then open Job Intelligence. Available results depend on the configured providers and public fallback availability."
+    if any(word in q for word in ("cv", "cover letter", "outreach", "interview")):
+        return "After a successful run, open CV Versions Hub for the tailored CV, Outreach for the draft message, and Interview Prep for role-specific practice. Review and edit generated content before using it."
+    return "I can help with the CareerOS workflow, resume verification, ATS alignment, job listings, CV/outreach/interview materials, company research, and human-review controls. Try one of the suggested questions below."
+
+def _career_assistant_reply(prompt: str) -> str:
+    api_key = st.session_state.get("groq_api_key", "").strip()
+    if api_key:
+        try:
+            from langchain_groq import ChatGroq
+            from langchain_core.messages import HumanMessage, SystemMessage
+            history = st.session_state.get("assistant_messages", [])[-8:]
+            messages = [SystemMessage(content=(
+                "You are CareerOS Assist, an informational assistant embedded in a career dashboard. "
+                "Answer concisely using only the app context: resume fact verification, job search, ATS skill alignment, tailored CV, outreach, interview prep, and human approval. "
+                "Do not claim partnerships with Jazz, Foodpanda, banks, or employers. Do not claim this demo submits real applications; RPA authorization is simulated. "
+                "Never ask for or reveal API keys. If asked about live company vacancies, direct the user to Job Intelligence and official employer careers pages."
+            ))]
+            for item in history:
+                role = "assistant" if item.get("role") == "assistant" else "human"
+                messages.append(HumanMessage(content=item.get("content", "")) if role == "human" else SystemMessage(content="Previous assistant answer: " + item.get("content", "")))
+            messages.append(HumanMessage(content=prompt))
+            response = ChatGroq(model="openai/gpt-oss-120b", api_key=api_key, temperature=0.2).invoke(messages)
+            answer = str(response.content).strip()
+            if answer:
+                return answer
+        except Exception:
+            pass
+    return _career_faq_reply(prompt)
+
+def _ask_career_assistant(prompt: str) -> None:
+    question = prompt.strip()
+    if not question:
+        return
+    st.session_state["assistant_messages"].append({"role": "user", "content": question})
+    answer = _career_assistant_reply(question)
+    st.session_state["assistant_messages"].append({"role": "assistant", "content": answer})
+
 def _authorize_direct() -> None:
     st.session_state["z_axis_approved"] = True
     st.session_state["rpa_result"] = {"message": "Simulated Success for Cloud Demo"}
@@ -453,7 +538,14 @@ with top_theme:
         st.rerun()
 
 if navigation == "Dynamic Dashboard":
-    _page_header("Workspace / Overview", "CareerOS", "Your live career pipeline, from verified profile to human-reviewed application.")
+    st.markdown("""
+    <div class="cos-hero">
+      <div class="cos-hero-kicker">◈ Career intelligence · Human in control</div>
+      <div class="cos-hero-title">Your next opportunity starts here.</div>
+      <div class="cos-hero-copy">One workspace for verified profile insights, job discovery, tailored materials, and review-ready actions.</div>
+    </div>
+    """, unsafe_allow_html=True)
+    _page_header("Workspace / Overview", "CareerOS Dashboard", "Your live career pipeline, from verified profile to human-reviewed application.")
     with st.container(border=True):
         st.caption("START A NEW RUN")
         role_column, resume_column = st.columns([1, 1.4], vertical_alignment="bottom")
@@ -492,6 +584,23 @@ if navigation == "Dynamic Dashboard":
             st.write(profile.get("summary", ""))
             if profile.get("skills"):
                 st.caption("Verified skills · " + " / ".join(profile["skills"]))
+
+    st.markdown('<div class="cos-assistant"><div class="cos-assistant-label">✦ CAREEROS ASSIST</div><h3 style="margin:.25rem 0">How can I help?</h3><p style="color:var(--cos-muted);margin:0">Ask about your workflow, job search, ATS score, or application materials.</p></div>', unsafe_allow_html=True)
+    quick_col1, quick_col2, quick_col3 = st.columns(3)
+    if quick_col1.button("How do I get started?", key="assist_start", use_container_width=True):
+        _ask_career_assistant("How do I get started?")
+    if quick_col2.button("Explain my ATS score", key="assist_ats", use_container_width=True):
+        _ask_career_assistant("Explain my ATS score")
+    if quick_col3.button("Company and job info", key="assist_companies", use_container_width=True):
+        _ask_career_assistant("How can I find company and job information about Jazz, Foodpanda, and banks?")
+    with st.container(border=True):
+        for message in st.session_state["assistant_messages"][-10:]:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+        user_question = st.chat_input("Ask CareerOS Assist…", key="career_assistant_input")
+        if user_question:
+            _ask_career_assistant(user_question)
+            st.rerun()
 
 elif navigation == "CV Versions Hub":
     _page_header("Workspace / Documents", "CV Versions Hub", "Review and export the role-specific version built from verified profile facts.")
